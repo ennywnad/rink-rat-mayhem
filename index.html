@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rink Rat Mayhem</title>
+<meta name="description" content="A 3-on-3 mutant hockey brawler in your browser. One-period challenges, unlockable power-ups, a skill stick and a comic-book 3D arena.">
+<meta name="theme-color" content="#120c1a">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Rink Rat Mayhem">
+<meta property="og:description" content="A 3-on-3 mutant hockey brawler in your browser. One-period challenges, unlockable power-ups and a comic-book 3D arena.">
+<meta property="og:image" content="https://ennywnad.github.io/rink-rat-mayhem/assets/og.jpg">
+<meta property="og:url" content="https://ennywnad.github.io/rink-rat-mayhem/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Metal+Mania&family=Saira+Semi+Condensed:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app menu" id="app">
+  <header class="board">
+    <div class="row1">
+      <button class="ib" id="btnPause" type="button" aria-label="Pause">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+      </button>
+      <div class="team h">
+        <div class="tlabel"><span class="abbr"><i class="swatch" style="background:var(--rat)"></i>RAT</span><span class="sub" id="hSub">SOG 0 · KO 0</span></div>
+        <span class="score" id="sH">0</span>
+      </div>
+      <div class="clockbox"><span class="per" id="arenaShort">PERIOD</span><span class="clock" id="clk">2:00</span></div>
+      <div class="team a">
+        <span class="score" id="sA">0</span>
+        <div class="tlabel"><span class="abbr"><span id="aAbbr">CPU</span><i class="swatch" id="aSw"></i></span><span class="sub" id="aSub">SOG 0 · KO 0</span></div>
+      </div>
+      <div class="hbtns">
+      <button class="ib" id="btnCtrls" type="button" aria-label="Show controls" aria-pressed="false" title="Show controls">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 7.5h11a4 4 0 0 1 3.9 4.8l-1 4.6a2.2 2.2 0 0 1-3.8 1L14.4 15.5H9.6l-2.2 2.4a2.2 2.2 0 0 1-3.8-1l-1-4.6a4 4 0 0 1 3.9-4.8z"/><path d="M8 10.5v3M6.5 12h3"/><circle cx="15.5" cy="11" r=".9" fill="currentColor"/><circle cx="17.5" cy="13" r=".9" fill="currentColor"/></svg>
+      </button>
+      <button class="ib" id="btnSound" type="button" aria-label="Mute sound" aria-pressed="false">
+        <svg id="icoOn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+        <svg id="icoOff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+      </button>
+      </div>
+    </div>
+    <div class="objline" id="objLine"><span id="objText">Win the period</span><span class="prog" id="objProg"></span></div>
+    <div class="ctrlbar" id="ctrlBar" hidden aria-label="Controls"></div>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="gl" hidden aria-hidden="true"></canvas>
+    <canvas id="rink" aria-label="Hockey rink"></canvas>
+    <div class="ctrls">
+      <button class="cb" id="bPower" type="button" aria-label="Use power-up"><span id="pIcon"></span><span class="pl" id="pLabel">EMPTY</span></button>
+      <button class="cb" id="bPass" type="button"><span id="passLabel">SWITCH</span></button>
+      <button class="cb" id="bShoot" type="button"><span id="shootLabel">CHECK</span></button>
+    </div>
+    <div class="toast" id="toast" hidden><b id="tMain"></b><span id="tSub"></span></div>
+
+    <div class="sheet" id="hub"><div class="wrap" id="hubWrap"></div></div>
+    <div class="sheet" id="brief" hidden><div class="wrap center"><div class="card" id="briefCard" style="width:100%"></div></div></div>
+    <div class="sheet" id="kit" hidden><div class="wrap" id="kitWrap"></div></div>
+    <div class="sheet" id="pause" hidden><div class="wrap center"><div class="card" style="width:100%;max-width:380px">
+      <div><p class="eyebrow" id="pauseInfo">Paused</p><h2 class="h" id="pauseTitle" style="font-size:30px;margin-top:8px">Timeout</h2></div>
+      <div class="btns">
+        <button class="btn" id="btnResume" type="button">Back to the ice</button>
+        <button class="btn ghost" id="btnPracSet" type="button" hidden>Practice settings</button>
+        <button class="btn ghost" id="btnRestart" type="button">Restart challenge</button>
+        <button class="btn ghost" id="btnQuit" type="button">Quit to locker room</button>
+      </div>
+    </div></div></div>
+    <div class="sheet" id="prac" hidden><div class="wrap" id="pracWrap"></div></div>
+    <div class="sheet" id="results" hidden><div class="wrap center"><div class="card" id="resCard" style="width:100%"></div></div></div>
+  </div>
+</div>
+<script src="js/game.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/three.webgpu.min.js",
+  "three/webgpu": "./vendor/three/three.webgpu.min.js",
+  "three/tsl": "./vendor/three/three.tsl.min.js",
+  "three/addons/": "./vendor/three/addons/"
+} }
+</script>
+<script src="js/render3d.js"></script>
+</body>
+</html>

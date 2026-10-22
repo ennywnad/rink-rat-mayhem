@@ -1,0 +1,91 @@
+# Rink Rat Mayhem
+
+A 3-on-3 mutant hockey brawler that runs in your browser. Lead the Rink Rats through seven cursed arenas, win one-period challenges to earn XP, and unlock stranger power-ups along the way.
+
+**Play it:** https://ennywnad.github.io/rink-rat-mayhem/
+
+![Rink Rat Mayhem gameplay](assets/screenshot.jpg)
+
+## Features
+
+- **Seven challenges**, each one period with its own arena, hazards and objective: Opening Night, Hot Hands, Body Count, Brick Wall, Gravity Well, Shorthanded and the Mayhem Cup Final. Bonus objectives earn up to three stars each.
+- **Progression:** XP unlocks 12 power-ups and more loadout slots. The power-ups are Rocket Skates, Oil Slick, Fireball Puck, Land Mine, Magnet Stick, Shrink Ray, Ice Wall, Heat-Seeker, Kaiju Mode, Split Shot, Thunderstrike and Deep Freeze.
+- **Skill stick:** move your stick with the right stick to stickhandle and poke-check. Pull it back and flick it forward to shoot.
+- **Practice rink:** choose 0–3 opponents, 0–2 teammates, the goalies, the opponents' effort and the clock. Drill opponents carry the puck, lob it up ice, then back off or loop behind their net.
+- **Rules and sliders:** turn icing, faceoffs after goals, checking, knockouts, hazards and power-ups on or off. Tune speed, acceleration, shot power, checking, puck control and goalie for each team from 50% to 150%. These work in practice and in the regular challenges.
+- **Live stoppages:** players skate to the faceoff dot after goals and icings instead of teleporting, and coasting skaters sometimes lift a skate.
+- **Comic-book 3D arena:** cel shading and ink outlines, a crowd of mutant fans in team colors that cheers when its team scores, WebGPU by default with a WebGL2 fallback, plus a classic top-down 2D view.
+
+## Controls
+
+| Action | Keyboard | Controller | Touch |
+| --- | --- | --- | --- |
+| Skate | WASD / arrow keys | Left stick / D-pad | Drag on the left side |
+| Stickhandle, poke-check | I J K L | Right stick | — |
+| Skill shot | Hold K (back), then tap I | Pull the right stick back, then flick it forward | — |
+| Shoot (hold to wind up) / body-check | Space | A / RT | Shoot button |
+| Pass / switch player | Shift | X / LB | Pass button |
+| Power-up | E | B / RB | Power button |
+| Pause | P / Esc | Start / Menu | Pause button |
+
+Controllers use the standard browser gamepad mapping (Xbox, PlayStation and Switch Pro all work). The on-screen controls strip shows the buttons for whatever you're using. The right stick follows the camera.
+
+## Graphics
+
+Open **Graphics** in the locker room to pick a detail level (Auto, High, Medium, Low or the Classic 2D view) and the 3D engine:
+
+- **WebGPU** (default) gives the best look. It needs a recent Chrome, Edge or Safari.
+- **WebGL2 (compatibility)** works on older browsers and GPUs.
+
+If the 3D view fails a startup check, the game steps down on its own: first lower detail, then WebGL2, then the classic view.
+
+## Saves
+
+Progress is saved in your browser. To move it to another browser or device, open **Save data** in the locker room, copy your save code, then paste and load it on the other one.
+
+## Run it locally
+
+No build step. Serve the folder with any static file server:
+
+```bash
+python3 -m http.server 8123
+# open http://localhost:8123
+```
+
+Opening `index.html` straight from disk won't work: the browser blocks ES module imports from `file://` pages.
+
+Add `?debug` to the URL to expose test hooks (debug camera, renderer internals) on `window.__r3d`.
+
+### Smoke test
+
+```bash
+npm install
+npx playwright install chromium
+npm run serve &   # in another terminal
+npm test
+```
+
+The test plays a few seconds of a challenge and a practice in both the classic and 3D views, round-trips a save code, and fails on any page error. GitHub Actions runs it on every push, then deploys to GitHub Pages.
+
+## Project layout
+
+```
+index.html            page markup and import map
+css/style.css         UI styles
+js/game.js            simulation, AI, rules, menus, input and the classic 2D view
+js/render3d.js        three.js broadcast renderer (WebGPU / WebGL2, TSL node materials)
+vendor/three/         three.js r180 (pinned, served locally)
+assets/               icon, social preview, screenshot
+tests/smoke.mjs       Playwright smoke test
+.github/workflows/    test + Pages deploy
+```
+
+## Credits
+
+- Built with [three.js](https://threejs.org) (MIT).
+- Fonts: Bungee, Metal Mania and Saira Semi Condensed from Google Fonts (SIL Open Font License).
+- Inspired by the over-the-top arcade hockey games of the '90s. All teams, players, arenas and sponsors are made up.
+
+## License
+
+[MIT](LICENSE)
