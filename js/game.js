@@ -130,7 +130,7 @@ try { const s = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (s && typeo
 let muted = false;
 try { muted = localStorage.getItem('rinkrat-mute') === '1'; } catch(e) {}
 let dbDoc = null, dbChain = Promise.resolve();
-const GAME_VERSION = 'v1.0.0';
+const GAME_VERSION = 'v1.1.0';
 // save codes: "RRM1." + base64url(JSON)
 function exportSave(){ const j = JSON.stringify({ ...save, updatedAt:Date.now() }); return 'RRM1.' + btoa(unescape(encodeURIComponent(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function importSave(code){
@@ -226,7 +226,7 @@ let G = null;
 const team = { home:null, away:null };
 function mkSkater(tm, idx, role, sp){
   return { team:tm, idx, role, species:sp, x:CX, y:100, vx:0, vy:0, face:0, r:SK_R, max:26, acc:72, hp:100,
-    ko:0, stun:0, frozen:0, inv:0, cool:0, pokeCd:0, lunge:0, charge:0, charging:false, rocket:0, kaiju:0, magnet:0,
+    ko:0, stun:0, down:0, check:0, frozen:0, inv:0, cool:0, pokeCd:0, lunge:0, charge:0, charging:false, rocket:0, kaiju:0, magnet:0,
     hitImm:0, slowed:false, slickCd:0, sawCd:0, lastBy:null, lastT:-9, spin:0,
     ai:{ think:0, lane:CX, chargeTo:0.5, aimX:CX } };
 }
@@ -457,7 +457,11 @@ function hit(att, vic, power, nx, ny){
   if (vic === ctrlSk()) rumble(Math.min(1, power/55), 0.6, 200); else if (att === ctrlSk()) rumble(Math.min(0.6, power/90), 0.7, 140);
   G.hits[att.team]++;
   vic.vx += nx * (10 + power*0.28); vic.vy += ny * (10 + power*0.28);
-  vic.stun = Math.max(vic.stun, 0.45 + power/110); vic.spin = (Math.random()<0.5?-1:1)*rand(6,10);
+  const big = power >= 30;
+  vic.stun = Math.max(vic.stun, big ? 0.95 + power/120 : 0.3 + power/170);
+  if (big) vic.down = Math.max(vic.down || 0, vic.stun);
+  vic.spin = (Math.random()<0.5?-1:1)*rand(1.2, 2.6)*(big ? 1 : 0.4);
+  att.check = 0.34; att.checkDir = Math.atan2(ny, nx); att.vx *= 0.72; att.vy *= 0.72;
   const ko = hurt(vic, power, att.team, 'hit');
   if (!ko && power > 28) pop((att.x+vic.x)/2, (att.y+vic.y)/2 - 3, pick(HIT_WORDS), '#ffb51e', 15 + Math.min(10, power/8), 0.9);
   burst(vic.x, vic.y, 8 + Math.floor(power/8), ['#ffffff','#ffd77a', SPECIES[vic.species].head], 18, 0.5, 0.5);
@@ -470,7 +474,7 @@ function explode(x, y, R, dmg, srcTeam, kind){
     if (d < R + s.r) {
       const k = 1 - d/(R+s.r)*0.6, nx = (s.x-x)/(d||1), ny = (s.y-y)/(d||1);
       s.vx += nx*45*k; s.vy += ny*45*k;
-      if (s.kaiju <= 0) { s.stun = Math.max(s.stun, 1.0); s.spin = rand(-12,12); }
+      if (s.kaiju <= 0) { s.stun = Math.max(s.stun, 1.0); s.down = Math.max(s.down || 0, 1.0); s.spin = rand(-3, 3); }
       hurt(s, dmg*k, srcTeam || (s.team==='home' ? 'away' : 'home'), kind);
     }
   }
@@ -498,7 +502,16 @@ function bladeTarget(s){
     a = 0.14 + Math.sin(ph)*0.34*calm + Math.sin(ph*0.37 + 1)*0.1; r = s.r + 1.5 + Math.cos(ph*0.5)*0.15;
     if (s.dk > 0) { a = s.dkA; r = s.r + 2.1; }
     if (s.charging) { a = 0.05; r = s.r + 1.6; }
-  } else { a = 0.12; r = s.r + 1.7; }
+  } else {
+    // without the puck: get the stick down toward a loose puck or an incoming pass
+    const d = hyp(P.x - s.x, P.y - s.y);
+    a = 0.12; r = s.r + 1.7;
+    if (!P.owner && !P.hold && !P.ref && !P.sunk && (P.passTo === s || d < 9)) {
+      const rel = angDiff(Math.atan2(P.y - s.y, P.x - s.x), s.face);
+      if (Math.abs(rel) < 1.9) { a = rel*0.85; r = s.r + Math.min(2.5, 1.3 + d*0.22); }
+    }
+  }
+  if (s.swing > 0) { a = clamp(angDiff(s.swingA, s.face), -1.2, 1.2)*0.8; r = s.r + 2.5; }   // pass / shot follow-through
   if (s.relT > 0) { a = 0.05; r = s.r + 1.9; }
   if (s.lunge > 0) { a *= 0.4; r += 1.9; }
   if (s.stun > 0 || s.frozen > 0) { a = 0.9; r = s.r + 1.2; }
@@ -549,7 +562,7 @@ const skillAim = s => { const v = s.skIn, m = v ? hyp(v[0], v[1]) : 0; if (m < 0
 function updSkater(s, ix, iy, h){
   if (s.ko > 0) return;
   if (s.frozen > 0) { ix = iy = 0; s.vx *= Math.exp(-6*h); s.vy *= Math.exp(-6*h); }
-  else if (s.stun > 0) { ix = iy = 0; s.face += s.spin*h; }
+  else if (s.stun > 0) { ix = iy = 0; s.face += s.spin*h; s.spin *= Math.exp(-2.2*h); }
   let max = s.max, acc = s.acc;
   if (s.charging) max *= 0.72;
   if (G.pucks[0].owner === s) max *= 0.94;
@@ -558,9 +571,26 @@ function updSkater(s, ix, iy, h){
   if (G.low) acc *= 0.62;
   if (s.rocket > 0 && !ix && !iy && s.stun <= 0 && s.frozen <= 0) { ix = Math.cos(s.face); iy = Math.sin(s.face); }
   if (ix || iy) {
-    const tvx=ix*max, tvy=iy*max, ax=tvx-s.vx, ay=tvy-s.vy, a=hyp(ax,ay), step=acc*h;
-    if (a > step) { s.vx += ax/a*step; s.vy += ay/a*step; } else { s.vx = tvx; s.vy = tvy; }
-    s.face = turn(s.face, Math.atan2(iy, ix), 10*h);
+    // skaters carve: at speed the velocity swings toward the stick direction along an arc (tighter when slow),
+    // a hard reversal is a hockey stop, and from a near standstill they can push off any way they like
+    const im = Math.min(1, hyp(ix, iy)), th = Math.atan2(iy, ix), sp = hyp(s.vx, s.vy), want = max*im;
+    const vh = Math.atan2(s.vy, s.vx), dA = angDiff(th, vh);
+    if (sp > 7 && Math.abs(dA) < 2.05 && s.stun <= 0) {
+      const rate = (5.4 - 2.6*Math.min(1, sp/Math.max(1, max))) * (s.charging ? 0.75 : 1) * (G.low ? 0.55 : 1) * (s.rocket > 0 ? 0.75 : 1);
+      const turnBy = clamp(dA, -rate*h, rate*h), nh = vh + turnBy;
+      let ns = sp + clamp(want - sp, -acc*1.3*h, acc*h);
+      ns -= Math.abs(turnBy)*sp*0.12;                       // a hard carve bleeds a little speed
+      s.vx = Math.cos(nh)*ns; s.vy = Math.sin(nh)*ns;
+      s.face = turn(s.face, vh + clamp(dA, -0.55, 0.55), 9*h);   // look into the turn, not past it
+    } else if (sp > 7 && s.stun <= 0) {
+      const ns = Math.max(0, sp - acc*1.9*h);                // hockey stop
+      s.vx = s.vx/sp*ns; s.vy = s.vy/sp*ns;
+      s.face = turn(s.face, th, 6*h);
+    } else {
+      const tvx=ix*max, tvy=iy*max, ax=tvx-s.vx, ay=tvy-s.vy, a=hyp(ax,ay), step=acc*h;
+      if (a > step) { s.vx += ax/a*step; s.vy += ay/a*step; } else { s.vx = tvx; s.vy = tvy; }
+      s.face = turn(s.face, th, 10*h);
+    }
   } else if (s.frozen <= 0) {
     const f = Math.exp(-(G.low ? 0.4 : 1.5)*h); s.vx *= f; s.vy *= f;
   }
@@ -584,7 +614,7 @@ function skaterHazards(s, h){
   }
   for (const v of H.vents) if (v.on && !v.hit.has(s) && hyp(s.x-v.x, s.y-v.y) < v.r + s.r) {
     v.hit.add(s); if (immune) continue;
-    const nx=(s.x-v.x)||0.1, ny=(s.y-v.y)||0.1, d=hyp(nx,ny); s.vx += nx/d*30; s.vy += ny/d*30; s.stun = Math.max(s.stun, 0.8); s.spin = 9;
+    const nx=(s.x-v.x)||0.1, ny=(s.y-v.y)||0.1, d=hyp(nx,ny); s.vx += nx/d*30; s.vy += ny/d*30; s.stun = Math.max(s.stun, 1.0); s.down = Math.max(s.down || 0, 1.0); s.spin = 2;
     burst(s.x, s.y, 12, ['#ff6a1a','#ffb51e','#3a2a22'], 18, 0.7, 0.6);
     hurt(s, 38, other(s.team), 'fire'); sfx('fire');
   }
@@ -597,13 +627,13 @@ function skaterHazards(s, h){
   s.sawCd -= h;
   for (const w of H.saws) if (s.sawCd <= 0 && hyp(s.x-w.x, s.y-w.y) < w.r + s.r) {
     s.sawCd = 0.8; if (immune) continue;
-    const ny = s.y > w.y ? 1 : -1; s.vy += ny*32; s.vx += w.dir*w.sp; s.stun = Math.max(s.stun, 0.7); s.spin = 10;
+    const ny = s.y > w.y ? 1 : -1; s.vy += ny*32; s.vx += w.dir*w.sp; s.stun = Math.max(s.stun, 0.95); s.down = Math.max(s.down || 0, 0.95); s.spin = 2.5;
     burst(s.x, s.y, 14, ['#ffffff','#c0c6cc','#ffd77a'], 22, 0.4, 0.5);
     hurt(s, 42, other(s.team), 'saw'); sfx('saw');
   }
   for (const t of G.traps) if (t.kind==='slick' && t.team !== s.team && s.slickCd <= 0 && hyp(s.x-t.x, s.y-t.y) < t.r) {
     s.slickCd = 1.6; if (immune) continue;
-    s.stun = Math.max(s.stun, 1.1); s.spin = (Math.random()<0.5?-1:1)*14; dropPuck(s, 16);
+    s.stun = Math.max(s.stun, 1.1); s.spin = (Math.random()<0.5?-1:1)*11; dropPuck(s, 16);
     pop(s.x, s.y-3, 'WIPEOUT!', '#ffb51e', 14, 0.9);
   }
 }
@@ -674,7 +704,7 @@ function shoot(s, power, ang){
       sfx('zap');
     }
   }
-  s.cool = 0.3; s.charging = false; s.charge = 0;
+  s.cool = 0.3; s.charging = false; s.charge = 0; s.swing = 0.28; s.swingA = ang;
   sfx('shot', power);
   if (s === ctrlSk()) rumble(0.1, 0.3 + power*0.5, 80);
 }
@@ -694,7 +724,7 @@ function passPuck(s, pref){
   const tx = best.x + best.vx*lt*0.85, ty = best.y + best.vy*lt*0.85, a = Math.atan2(ty-P.y, tx-P.x);
   P.owner = null; P.vx = Math.cos(a)*sp; P.vy = Math.sin(a)*sp; P.passTo = best; P.passT = 1.4; P.shotBy = null; P.last = s.team; P.team = s.team;
   P.icing = (s.team === 'home' ? P.y > 100 : P.y < 100) ? s.team : null;
-  s.cool = 0.28; s.charging = false;
+  s.cool = 0.28; s.charging = false; s.swing = 0.24; s.swingA = a;
   if (s === ctrlSk()) { G.ctrl = G.sk.indexOf(best); G.switchCd = 0.6; }
   sfx('stick', 0.9);
   return { target:best, score:bs };
@@ -707,7 +737,8 @@ function updGoalie(g, dt, speed, react){
   g.r += ((g.shrink > 0 ? G_R*0.45 : G_R) - g.r) * Math.min(1, dt*5);
   const top = g.team === 'away', gy = top ? GT : GB, P = G.pucks[0];
   if (g.hold > 0) { g.hold -= dt; if (g.hold <= 0) outlet(g); return; }
-  if (g.stun > 0) { g.face += dt*9; return; }
+  g.save = Math.max(0, (g.save || 0) - dt);
+  if (g.stun > 0) return;
   if (g.frozen > 0) return;
   const sp = g.shrink > 0 ? speed*0.6 : speed;
   let tgt = P;
@@ -750,7 +781,11 @@ function goaliePuck(g, P){
   P.x = g.x+nx*rr; P.y = g.y+ny*rr;
   const vn = P.vx*nx + P.vy*ny;
   if (vn < 0) {
-    if (P.shotBy && P.shotBy !== g.team && G.state === 'play') { G.sog[P.shotBy]++; P.shotBy = null; }
+    if (P.shotBy && P.shotBy !== g.team && G.state === 'play') {
+      G.sog[P.shotBy]++; P.shotBy = null;
+      // remember the save for the animation: which side (goalie's right is +) and whether it came in high
+      g.save = 0.55; g.saveLat = clamp((dx*-Math.sin(g.face) + dy*Math.cos(g.face))/rr, -1, 1); g.saveHigh = speed > 58 ? 1 : 0;
+    }
     P.vx -= 1.4*vn*nx; P.vy -= 1.4*vn*ny;
     const kk = rand(-0.5,0.5)*speed*0.4; P.vx += -ny*kk; P.vy += nx*kk;
     P.vx *= 0.55; P.vy *= 0.55; P.homing = 0;
@@ -787,7 +822,7 @@ function bodyPuck(P, s){
   if (d < rr && d > 0) {
     const nx=dx/d, ny=dy/d;
     if (P.fire > 0 && P.team !== s.team && s.hitImm <= 0) {
-      s.hitImm = 0.5; s.vx += P.vx*0.3; s.vy += P.vy*0.3; s.stun = Math.max(s.stun, 0.8); s.spin = 10;
+      s.hitImm = 0.5; s.vx += P.vx*0.3; s.vy += P.vy*0.3; s.stun = Math.max(s.stun, 1.0); s.down = Math.max(s.down || 0, 1.0); s.spin = 3;
       hurt(s, 32, P.team, 'fire'); burst(s.x, s.y, 12, ['#ff6a1a','#ffb51e'], 18, 0.6, 0.5);
       P.vx *= 0.85; P.vy *= 0.85; return;
     }
@@ -1229,7 +1264,7 @@ function usePower(tm, user){
     case 'shrink': { const g = goalieOf(opp); g.shrink = 8; G.beams.push({ x1:user.x, y1:user.y, x2:g.x, y2:g.y, c:'#7ef0ff', life:0.4, max:0.4 }); burst(g.x, g.y, 16, ['#7ef0ff','#ffffff'], 16, 0.5, 0.6); pop(g.x, g.y - 5, 'TINY GOALIE', '#7ef0ff', 13, 1.2); sfx('zap'); break; }
     case 'wall': { const y = tm === 'home' ? GB - 8 : GT + 8; G.walls.push({ team:tm, x1:30, x2:55, y, life:8, max:8 }); burst(CX, y, 24, ['#e8f6ff','#9fd6ff','#ffffff'], 14, 0.6, 0.7); sfx('freeze'); break; }
     case 'kaiju': user.kaiju = 6; sfx('grow'); shake(1.4); break;
-    case 'lightning': for (const s of G.sk) { if (s.team !== opp || s.ko > 0) continue; G.bolts.push({ x:s.x, y:s.y, life:0.45, max:0.45, seg:mkBolt() }); s.stun = Math.max(s.stun, 1.3); s.spin = 14; hurt(s, 48, tm, 'hit'); burst(s.x, s.y, 14, ['#fff7a8','#ffffff','#7ef0ff'], 20, 0.5, 0.6); } sfx('thunder'); shake(2); break;
+    case 'lightning': for (const s of G.sk) { if (s.team !== opp || s.ko > 0) continue; G.bolts.push({ x:s.x, y:s.y, life:0.45, max:0.45, seg:mkBolt() }); s.stun = Math.max(s.stun, 1.3); s.down = Math.max(s.down || 0, 1.3); s.spin = 1.5; hurt(s, 48, tm, 'hit'); burst(s.x, s.y, 14, ['#fff7a8','#ffffff','#7ef0ff'], 20, 0.5, 0.6); } sfx('thunder'); shake(2); break;
     case 'freeze': for (const s of G.sk) if (s.team === opp && s.ko <= 0 && s.kaiju <= 0) { s.frozen = 3; s.charging = false; dropPuck(s, 6); } goalieOf(opp).frozen = 3; sfx('freeze'); shake(0.8); break;
   }
 }
@@ -1503,7 +1538,7 @@ function update(dt){
   }
   for (const s of G.sk) {
     s.cool = Math.max(0, s.cool-dt); s.pokeCd = Math.max(0, s.pokeCd-dt); s.lunge = Math.max(0, s.lunge-dt); s.hitImm = Math.max(0, s.hitImm-dt);
-    s.stun = Math.max(0, s.stun-dt); s.frozen = Math.max(0, s.frozen-dt); s.inv = Math.max(0, s.inv-dt); s.slickCd = Math.max(0, s.slickCd-dt);
+    s.stun = Math.max(0, s.stun-dt); s.down = Math.max(0, (s.down || 0)-dt); s.swing = Math.max(0, (s.swing || 0)-dt); s.check = Math.max(0, (s.check || 0)-dt); s.frozen = Math.max(0, s.frozen-dt); s.inv = Math.max(0, s.inv-dt); s.slickCd = Math.max(0, s.slickCd-dt);
     s.rocket = Math.max(0, s.rocket-dt); s.kaiju = Math.max(0, s.kaiju-dt); s.magnet = Math.max(0, s.magnet-dt);
     if (s.rocket > 0) burst(s.x - Math.cos(s.face)*s.r, s.y - Math.sin(s.face)*s.r, 2, ['#ff6a1a','#ffb51e','#fff1b0'], 6, 0.7, 0.35);
     if (s.ko > 0) { s.ko -= dt; if (s.ko <= 0) { s.ko = 0; s.hp = 100; s.inv = 1.4; s.x = 4.5; s.y = s.team === 'home' ? 112 : 88; s.vx = 14; s.vy = 0; s.face = 0; s.stun = 0; } }

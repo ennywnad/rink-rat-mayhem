@@ -757,6 +757,26 @@ async function init(){
   const outlineW = uniform(0.3);
   const outlineMat = new THREE.MeshBasicNodeMaterial({ color:0x0b0710, side:THREE.BackSide });
   outlineMat.positionNode = positionLocal.add(normalLocal.mul(outlineW.mul(attribute('aOL', 'float'))));
+  // comic power-up props: opaque cel shading + ink hulls so they read on bright ice
+  function celMat(hex, emis = 0){
+    const m = new THREE.MeshBasicNodeMaterial(), c = new THREE.Color(hex);
+    const ndl = normalWorld.dot(vec3(0.36, 0.86, 0.36).normalize());
+    const tone = mix(float(0.45), mix(float(0.78), float(1.06), step(0.45, ndl)), step(0.03, ndl));
+    m.colorNode = vec3(c.r, c.g, c.b).mul(tone.add(emis));
+    return m;
+  }
+  const inkProp = new THREE.MeshBasicNodeMaterial({ color:0x0b0710, side:THREE.BackSide });
+  const withInk = (mesh, k = 1.12) => { const h = new THREE.Mesh(mesh.geometry, inkProp); h.scale.setScalar(k); mesh.add(h); return mesh; };
+  const flameOuterMat = new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(1.3, 0.32, 0.02) });
+  const flameMidMat = new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(1.35, 0.78, 0.06) });
+  const flameCoreMat = new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(1.6, 1.5, 0.85) });
+  const packMat = celMat('#8d97a6'), packTrimMat = celMat('#ec3b4f'), spikeMat = celMat('#d9f27a', 0.15), eyeMat = new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(4.5, 0.5, 0.3) });
+  const magRedMat = celMat('#e8323f', 0.1), magTipMat = celMat('#e9eef4', 0.2);
+  const crystalMat = new THREE.MeshBasicNodeMaterial({ transparent:true, depthWrite:false });
+  { const ndl = normalWorld.dot(vec3(0.36, 0.86, 0.36).normalize()), fr = oneMinus(normalView.dot(positionViewDirection).abs());
+    crystalMat.colorNode = mix(mix(vec3(0.42, 0.72, 0.92), vec3(0.72, 0.92, 1.0), step(0.0, ndl)), vec3(1.15, 1.2, 1.25), step(0.55, ndl)).add(vec3(0.9).mul(step(0.62, fr)));
+    crystalMat.opacityNode = float(0.5).add(step(0.62, fr).mul(0.4)); }
+  const crystalEdgeMat = new THREE.MeshBasicNodeMaterial({ color:0x1d4a6a, side:THREE.BackSide, transparent:true, opacity:0.85, depthWrite:false });
   const SPEC = S.SPECIES;
   const FAB = [0.78, 0, 0, 0], GLOSS = [0.22, 0, 1, 0], MATTE = [0.9, 0, 0, 0], METAL = [0.25, 1, 0, 0], RUB = [0.5, 0, 0.3, 0], GLOW = [0.5, 0, 0, 1];
   function darker(hex, f){ return '#' + new THREE.Color(hex).multiplyScalar(f).getHexString(); }
@@ -925,10 +945,36 @@ async function init(){
       nm.position.set(0, 0.32, G ? -1.07 : -0.88); nm.rotation.set(-0.12, Math.PI, 0); B.chest.add(nm);
     }
     // power-up attachments
-    const flames = new THREE.Group(); for (const sx of [-0.4, 0.4]) { const f = new THREE.Mesh(new THREE.ConeGeometry(0.4, 2.6, 8, 1, true), flameMat); f.geometry.translate(0, 1.3, 0); f.rotation.x = -Math.PI/2; f.position.set(sx, 0.35, -0.5); f.scale.set(1, 1, 1); flames.add(f); } flames.visible = false; group.add(flames);
-    const ice = new THREE.Mesh(new THREE.BoxGeometry(3.4, 6.8, 3.4), wallMat); ice.position.y = 3.3; ice.visible = false; group.add(ice);
+    // rocket skates: a twin-tube jet pack on the back with layered comic flames
+    const flames = new THREE.Group(); flames.visible = false; B.chest.add(flames);
+    { const pack = withInk(new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.0, 0.45), packMat), 1.1); pack.position.set(0, 0.25, -0.95); flames.add(pack);
+      flames.userData.jets = [];
+      for (const sx of [-0.34, 0.34]) {
+        const tube = withInk(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 1.3, 10), packMat), 1.12); tube.position.set(sx, 0.05, -1.25); flames.add(tube);
+        const band = new THREE.Mesh(new THREE.CylinderGeometry(0.255, 0.255, 0.18, 10), packTrimMat); band.position.set(sx, 0.25, -1.25); flames.add(band);
+        const jet = new THREE.Group(); jet.position.set(sx, -0.62, -1.25); flames.add(jet);
+        const cone = (r, h, m) => { const g = new THREE.ConeGeometry(r, h, 8); g.rotateX(Math.PI); g.translate(0, -h/2, 0); return new THREE.Mesh(g, m); };   // wide at the nozzle, tip trailing
+        const outer = withInk(cone(0.34, 1.7, flameOuterMat), 1.12), mid = cone(0.25, 1.15, flameMidMat), core = cone(0.15, 0.65, flameCoreMat);
+        jet.add(outer, mid, core); jet.rotation.x = -0.45;   // chest leans forward, so this points the flames down and back
+        flames.userData.jets.push(jet);
+      }
+    }
+    // deep freeze: a faceted ice crystal around the player
+    const ice = new THREE.Group(); ice.visible = false; group.add(ice);
+    { const shard = (sx, sy, sz, x, y, z, rx, rz) => { const g = new THREE.OctahedronGeometry(1, 0); const m = new THREE.Mesh(g, crystalMat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.rotation.set(rx, 0.4, rz); const e = new THREE.Mesh(g, crystalEdgeMat); e.scale.setScalar(1.06); m.add(e); m.renderOrder = 6; ice.add(m); };
+      shard(2.3, 4.4, 2.1, 0, 3.6, 0.2, 0.05, 0.04);
+      shard(0.9, 2.0, 0.8, 1.7, 1.2, 0.6, 0.2, -0.55); shard(0.8, 1.7, 0.8, -1.6, 1.0, -0.4, -0.2, 0.6); shard(0.7, 1.5, 0.7, 0.4, 1.0, 1.9, 0.6, 0.1); }
+    // kaiju mode: back spikes and glowing eyes
+    const kaiju = new THREE.Group(); kaiju.visible = false;
+    { for (const [y, z, h] of [[0.75, -0.8, 0.95], [0.25, -0.88, 0.8], [-0.2, -0.85, 0.65]]) { const sp = withInk(new THREE.Mesh(new THREE.ConeGeometry(0.22, h, 6), spikeMat), 1.14); sp.position.set(0, y, z - h*0.25); sp.rotation.x = -1.05; kaiju.add(sp); }
+      B.chest.add(kaiju);
+      const eyes = new THREE.Group(); for (const sx of [-0.2, 0.2]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), eyeMat); e.position.set(sx, 0.5, 0.52); eyes.add(e); } B.head.add(eyes); kaiju.userData.eyes = eyes; eyes.visible = false; }
+    // magnet stick: a horseshoe magnet on the blade plus the pulse ring on the ice
     const mag = new THREE.Mesh(new THREE.TorusGeometry(3.2, 0.09, 6, 40), new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(0.6, 3, 3.4) })); mag.rotation.x = Math.PI/2; mag.position.y = 0.4; mag.visible = false; group.add(mag);
-    return { group, mesh, B, flames, ice, mag, goalie:!!G, L, boff:BOFF };
+    { const hs = new THREE.Group(); const arc = withInk(new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.13, 8, 16, Math.PI), magRedMat), 1.12); hs.add(arc);
+      for (const sx of [-0.36, 0.36]) { const tip = withInk(new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.26, 0.27), magTipMat), 1.12); tip.position.set(sx, -0.13, 0); hs.add(tip); }
+      hs.position.set(BOFF + 0.1, -L + 0.75, 0); hs.rotation.set(0, Math.PI/2, Math.PI); hs.visible = false; B.stick.add(hs); mag.userData.shoe = hs; }
+    return { group, mesh, B, flames, ice, mag, kaiju, goalie:!!G, L, boff:BOFF };
   }
   const rigs = new Map(); let goalieRigs = null;
   function disposeRig(r){ dyn.remove(r.group); r.mesh.geometry.dispose(); r.group.traverse(o => { if (o.isMesh && o !== r.mesh && o.material && o.material.map && o.material.map.isCanvasTexture) { o.material.map.dispose(); o.material.dispose(); } }); }
@@ -996,17 +1042,50 @@ async function init(){
     g.position.set(v.x, 0, v.z); g.rotation.set(0, v.yaw + v.stopYaw*stopK, 0); g.scale.setScalar(scale);
     // celebration / KO / frozen
     const ko = s.ko > 0, frozen = s.frozen > 0, cele = v.cele > 0;
-    r.ice.visible = frozen; r.flames.visible = s.rocket > 0; r.mag.visible = s.magnet > 0;
-    if (s.rocket > 0) r.flames.children.forEach(f => f.scale.set(1, 0.8 + Math.random()*0.6, 1));
-    if (s.magnet > 0) { const ps = 1 + ((t*1.5) % 1)*0.5; r.mag.scale.setScalar(ps); }
+    r.ice.visible = frozen; r.flames.visible = s.rocket > 0; r.mag.visible = s.magnet > 0; r.mag.userData.shoe.visible = s.magnet > 0;
+    r.kaiju.visible = s.kaiju > 0; r.kaiju.userData.eyes.visible = s.kaiju > 0;
+    if (s.rocket > 0) r.flames.userData.jets.forEach((j, i) => { const f = 0.75 + Math.random()*0.5 + Math.min(0.4, speed/80); j.scale.set(0.9 + Math.random()*0.2, f, 0.9 + Math.random()*0.2); j.rotation.z = Math.sin(t*31 + i*2)*0.06; });
+    if (s.magnet > 0) { const ps = 1 + ((t*1.5) % 1)*0.5; r.mag.scale.setScalar(ps); r.mag.userData.shoe.rotation.x = Math.sin(t*20)*0.08; }
+    if (frozen) r.ice.rotation.y = -v.yaw + 0.3;
     B.root.rotation.set(0, 0, 0); B.root.position.set(0, 0, 0);
-    if (ko) { B.root.rotation.set(-Math.PI/2, 0, 0.2); B.root.position.set(0, 0.8, -2.5); poseNeutral(B); g.rotation.y = v.yaw; placeStickNeutral(r); return; }
+    if (ko) {
+      v.koT = (v.koT || 0) + dt; const fall = Math.min(1, v.koT/0.35), bounce = v.koT < 0.6 ? Math.abs(Math.sin(v.koT*9))*0.35*(1 - v.koT/0.6) : 0;
+      poseNeutral(B);
+      B.root.rotation.set(-Math.PI/2*fall, 0, 0.25*fall); B.root.position.set(0, 0.75*fall + bounce, 3.1*fall);
+      B.upArmL.rotation.set(0.2, 0, 1.9); B.upArmR.rotation.set(-0.3, 0, -1.6); B.foreArmL.rotation.set(-0.6, 0, 0); B.foreArmR.rotation.set(-0.9, 0, 0);
+      B.thighL.rotation.set(0.25, 0, 0.45); B.thighR.rotation.set(-0.15, 0, -0.3); B.shinL.rotation.set(-0.5, 0, 0); B.shinR.rotation.set(-0.2, 0, 0);
+      B.head.rotation.set(0, Math.sin(t*3)*0.35, 0);
+      g.rotation.y = v.yaw; placeStickNeutral(r); r.B.stick.position.set(-2.4, 0.25, 1.6); return;
+    }
+    v.koT = 0;
+    // knocked off the skates: topple the way they were sent, slide, then scramble back up
+    if ((s.down || 0) > 0) {
+      if (!(v.downPrev > 0)) {
+        v.downT = 0; const sp0 = Math.hypot(s.vx, s.vy) || 1, wx = s.vx/sp0, wz = s.vy/sp0, cy = Math.cos(v.yaw), sy = Math.sin(v.yaw);
+        v.fallX = wx*cy - wz*sy; v.fallZ = wx*sy + wz*cy; if (!isFinite(v.fallX)) { v.fallX = 0; v.fallZ = -1; }
+      }
+      v.downPrev = s.down; v.downT += dt;
+      const tilt = 1.32 * Math.min(1, v.downT/0.2) * Math.min(1, s.down/0.38), up = s.down < 0.38 ? 1 - s.down/0.38 : 0;
+      poseNeutral(B);
+      B.root.rotation.set(tilt*v.fallZ, 0, -tilt*v.fallX);
+      const fl = Math.sin(t*13 + s.idx)*0.5*(1 - up);
+      B.upArmL.rotation.set(-0.6 + fl, 0, 1.3 + fl*0.5); B.upArmR.rotation.set(-0.4 - fl, 0, -1.2 + fl*0.5);
+      B.thighL.rotation.set(0.7 + up*0.6, 0, 0.25); B.thighR.rotation.set(0.3 + up*0.9, 0, -0.2); B.shinL.rotation.set(-0.9 - up*0.6, 0, 0); B.shinR.rotation.set(-0.5 - up*1.1, 0, 0);
+      B.hips.position.y = 3.25 - up*0.9;
+      g.updateMatrixWorld(true); placeStickNeutral(r); r.B.stick.position.set(-1.6, 0.4, 1.2);
+      return;
+    }
+    v.downPrev = 0;
     if (frozen) return;
     // locomotion
     const moving = speed > 3.5;
     const accel = acc > 4;
     // one-skate glide: coasting players sometimes lift a skate off the ice (more often while skating to a faceoff)
-    const coast = speed > 5 && speed < 27 && !accel && stopK === 0 && s.stun <= 0 && !s.charging && s.lunge <= 0 && !cele;
+    // crossovers: in a carved turn the outside skate steps over the inside one
+    const crossT = Math.max(0, Math.min(1, (Math.abs(v.yawV) - 0.9)/1.6)) * Math.min(1, speed/12) * (1 - stopK);
+    v.cross = (v.cross || 0) + (crossT - (v.cross || 0))*Math.min(1, dt*6);
+    const outSg = v.yawV > 0 ? -1 : 1;
+    const coast = speed > 5 && speed < 27 && !accel && stopK === 0 && s.stun <= 0 && !s.charging && s.lunge <= 0 && !cele && v.cross < 0.2;
     v.liftT = (v.liftT ?? Math.random()*3) - dt;
     if (v.liftT <= 0) {
       if (v.liftOn) { v.liftOn = false; v.liftT = (G.state === 'regroup' ? 0.6 : 2.2) + Math.random()*(G.state === 'regroup' ? 1.2 : 4); }
@@ -1023,10 +1102,14 @@ async function init(){
     const crouch = cele ? 0.2 : 1;
     const hipsY = 3.25 - (0.75 + a*0.12 + stopK*0.35)*crouch;
     B.hips.position.y = hipsY;
-    B.hips.rotation.set(0, 0, v.bank*0.8 + (s.stun > 0 ? Math.sin(t*14)*0.3 : 0) + (v.lift || 0)*(v.liftLeg === 'L' ? -0.07 : 0.07));
+    B.hips.rotation.set(s.stun > 0 ? -0.18 : 0, 0, v.bank*0.8 + (s.stun > 0 ? Math.sin(t*14)*0.16 : 0) + (v.lift || 0)*(v.liftLeg === 'L' ? -0.07 : 0.07));
     const charge = s.charging ? s.charge : 0;
     B.spine.rotation.set((0.5 + a*0.12)*crouch + stopK*0.1, -charge*0.5, 0);
     B.chest.rotation.set(0.12*crouch, -charge*0.3 + Math.sin(v.phase)*0.12*a, 0);
+    if ((s.check || 0) > 0) {
+      const ck = Math.sin(Math.PI*(1 - s.check/0.34)), side = Math.sign(Math.sin((s.checkDir || 0) - s.face)) || 1;
+      B.spine.rotation.x += 0.35*ck; B.chest.rotation.y += side*0.6*ck; B.hips.position.y -= 0.3*ck;
+    }
     B.neck.rotation.set(-(0.62 + a*0.12)*crouch, 0, 0); B.head.rotation.set(0, 0, 0);
     if (B.tail) B.tail.rotation.set(0, Math.sin(t*6 + s.idx)*0.4, 0);
     g.updateMatrixWorld(true);
@@ -1034,6 +1117,11 @@ async function init(){
     for (const [sg, n, ph] of [[1, 'L', v.phase], [-1, 'R', v.phase + Math.PI]]) {
       const sn = Math.sin(ph), push = Math.max(0, sn), rec = Math.max(0, -sn);
       let fx = sg*(0.55 + a*0.85*push + stopK*0.6), fz = 0.25 - a*1.5*sn - stopK*0.3, fy = 0.43 + a*0.32*rec;
+      if (v.cross > 0.02) {
+        const ck = v.cross, cs = Math.sin(ph*1.0), cpush = Math.max(0, cs), crec = Math.max(0, -cs);
+        if (sg === outSg) { fx += (-sg*0.5 - fx)*crec*ck; fy += 0.42*crec*ck; fz += 0.45*crec*ck - 0.2*cpush*ck; }   // over the top
+        else { fx += (sg*(1.05 + 0.55*cpush) - fx)*ck*0.75; fz -= 0.25*cpush*ck; }                                // push out underneath
+      }
       if (cele) { fx = sg*0.6; fz = 0.2; fy = 0.43; }
       if (v.lift > 0.01) { if (n === v.liftLeg) { fx = sg*(0.45 - 0.1*v.lift); fy += 0.75*v.lift; fz -= 0.85*v.lift; } else fx -= sg*0.12*v.lift; }
       toW(r, fx, fy, fz, _tw); dirW(r, sg*0.15, 0, 1, _pw);
@@ -1127,27 +1215,37 @@ async function init(){
     if (!v.init) { v.x = gx; v.z = gz; v.init = true; }
     if (Math.hypot(gx - v.x, gz - v.z) > 9) { v.ox = v.x - gx; v.oz = v.z - gz; }
     v.ox *= Math.exp(-dt*3.5); v.oz *= Math.exp(-dt*3.5);
-    const lastX = v.x; v.x = gx + v.ox; v.z = gz + v.oz;
-    const latV = (v.x - lastX)/Math.max(dt, 1e-3);
+    const lastX = v.x, lastZ = v.z; v.x = gx + v.ox; v.z = gz + v.oz;
+    const latV = (v.x - lastX)/Math.max(dt, 1e-3), latVz = (v.z - lastZ)/Math.max(dt, 1e-3);
     const want = Math.atan2(Math.cos(g.face), Math.sin(g.face));
     let dy = want - v.yaw; while (dy > Math.PI) dy -= 2*Math.PI; while (dy < -Math.PI) dy += 2*Math.PI; v.yaw += dy*Math.min(1, dt*8);
     const grp = r.group; grp.position.set(v.x, 0, v.z); grp.rotation.set(0, v.yaw, 0); grp.scale.setScalar(scale);
-    r.ice.visible = g.frozen > 0; r.flames.visible = false; r.mag.visible = false;
+    r.ice.visible = g.frozen > 0; r.flames.visible = false; r.mag.visible = false; r.mag.userData.shoe.visible = false; r.kaiju.visible = false; r.kaiju.userData.eyes.visible = false;
     if (g.frozen > 0) return;
     B.root.rotation.set(0, 0, 0); B.root.position.set(0, 0, 0);
-    if (g.stun > 0) { B.root.rotation.set(-Math.PI/2, 0, 0); B.root.position.set(0, 0.9, -2.6); poseNeutral(B); placeStickNeutral(r); return; }
+    if (g.stun > 0) { poseNeutral(B); B.root.rotation.set(-Math.PI/2, 0, 0.2); B.root.position.set(0, 0.95, 3.0); B.upArmL.rotation.set(0, 0, 1.7); B.upArmR.rotation.set(0, 0, -1.7); placeStickNeutral(r); r.B.stick.position.set(-2.2, 0.3, 1.4); return; }
     // incoming shot -> butterfly
     let threat = 0;
     for (const Q of G.pucks) { if (Q.owner || Q.hold) continue; const sp = Math.hypot(Q.vx, Q.vy), d = Math.hypot(Q.x - g.x, Q.y - g.y); const toward = (Q.vx*(g.x - Q.x) + Q.vy*(g.y - Q.y))/(sp*d + 1e-6); if (sp > 28 && toward > 0.75 && d < 38) threat = Math.max(threat, 1); }
     if (P.hold === g) threat = 0.6;
     v.butter += (threat - v.butter)*Math.min(1, dt*(threat > v.butter ? 14 : 3));
+    // save reactions: kick a pad out low, flash the glove or blocker up high; a held puck gets covered
+    const se = (g.save || 0) > 0 ? Math.min(1, (0.55 - g.save)/0.07) * Math.min(1, g.save/0.25) : 0;
+    v.se = (v.se || 0) + (se - (v.se || 0))*Math.min(1, dt*20);
+    const sideSg = (g.saveLat || 0) > 0 ? -1 : 1, high = !!g.saveHigh, low = v.se*(high ? 0.25 : 1), up = v.se*(high ? 1 : 0);
+    if (low > 0.05) v.butter = Math.max(v.butter, low*0.85);
+    // shuffle: lateral steps lift the lead skate
+    const lx = latV*Math.cos(v.yaw) - latVz*Math.sin(v.yaw);
+    if (Math.abs(lx) > 3) v.gph = (v.gph || 0) + dt*11; const shuf = Math.min(1, Math.abs(lx)/14), leadSg = lx > 0 ? 1 : -1;
     const b = v.butter;
-    B.hips.position.y = 2.35 - b*1.05;
+    B.hips.position.y = 2.35 - b*1.05; B.hips.position.x = sideSg*0.45*low;
     B.hips.rotation.set(0, 0, Math.max(-0.3, Math.min(0.3, -latV/60)));
     B.spine.rotation.set(0.32 - b*0.1, 0, 0); B.chest.rotation.set(0.05, 0, 0); B.neck.rotation.set(-0.3, 0, 0);
     grp.updateMatrixWorld(true);
     for (const [sg, n] of [[1, 'L'], [-1, 'R']]) {
-      const fx = sg*(1.3 + b*0.7), fz = 0.1 - b*1.0, fy = 0.43 + b*0.05;
+      let fx = sg*(1.3 + b*0.7), fz = 0.1 - b*1.0, fy = 0.43 + b*0.05;
+      if (sg === sideSg && low > 0.05) { fx = sg*(1.3 + b*0.7 + 1.5*low); fz += 0.35*low; }
+      if (sg === leadSg && shuf > 0.1 && b < 0.4) { fy += 0.22*shuf*Math.max(0, Math.sin(v.gph)); fx += sg*0.25*shuf; }
       toW(r, fx, fy, fz, _tw); dirW(r, sg*(0.4 - b*1.2), 0, 1, _pw);
       ik2(B['thigh'+n], B['shin'+n], 1.4*scale, 1.3*scale, _tw, _pw);
       B['shin'+n].getWorldQuaternion(_q); grp.getWorldQuaternion(_gq);
@@ -1159,7 +1257,10 @@ async function init(){
     grp.updateMatrixWorld(true);
     const sc = scale;
     toW(r, r.stickGrip.x, r.stickGrip.y, r.stickGrip.z, _h2);
-    toW(r, 1.5 + b*0.4, 2.8 - b*0.6 + Math.sin(t*2)*0.1, 1.2, _h1);
+    if (P.hold === g) toW(r, 0.35, 0.9, 1.7, _h1);                                                     // glove covers the puck
+    else if (up > 0.05 && sideSg === 1) toW(r, 1.5 + 0.7*up, 2.8 + 2.2*up, 1.2 + 0.4*up, _h1);           // glove save
+    else toW(r, 1.5 + b*0.4, 2.8 - b*0.6 + Math.sin(t*2)*0.1, 1.2, _h1);
+    if (up > 0.05 && sideSg === -1) toW(r, -1.6 - 0.6*up, 2.7 + 1.9*up, 1.3, _h2);                         // blocker save
     dirW(r, 1, -1, -0.6, _pl); dirW(r, -1, -1, -0.6, _pr);
     ik2(B.upArmL, B.foreArmL, 0.95*sc, 0.95*sc, _h1, _pl);
     ik2(B.upArmR, B.foreArmR, 0.95*sc, 0.95*sc, _h2, _pr);
@@ -1441,7 +1542,7 @@ async function init(){
       const blob = (x, y, sz) => { if (bn >= 16) return; tmpM.compose(W(x, y, 0.03, tmpV), tmpQ.identity(), tmpS.set(sz, 1, sz)); blobMesh.setMatrixAt(bn++, tmpM); };
       for (const s of G.sk) {
         blob(s.x, s.y, s.ko > 0 ? 7 : 5.2*(s.r/(s.baseR||2.6)));
-        if ((s.ko > 0 || (s.stun > 0 && s.frozen <= 0)) && n < 37) for (let i=0;i<3;i++){ const a = t*5 + i*2.1 + s.idx; const h = s.ko > 0 ? 2.2 : 7; tmpM.compose(W(s.x + Math.cos(a)*1.6, s.y + Math.sin(a)*1.6, h + Math.sin(a*2)*0.3, tmpV), tmpQ.setFromEuler(new THREE.Euler(t*4, t*3, 0)), tmpS.setScalar(1)); starMesh.setMatrixAt(n++, tmpM); }
+        if ((s.ko > 0 || (s.stun > 0 && s.frozen <= 0)) && n < 37) for (let i=0;i<3;i++){ const a = t*5 + i*2.1 + s.idx; const h = s.ko > 0 ? 1.7 : 7, kx = s.ko > 0 ? s.x - Math.cos(s.face)*2.6 : s.x, ky = s.ko > 0 ? s.y - Math.sin(s.face)*2.6 : s.y; tmpM.compose(W(kx + Math.cos(a)*1.4, ky + Math.sin(a)*1.4, h + Math.sin(a*2)*0.3, tmpV), tmpQ.setFromEuler(new THREE.Euler(t*4, t*3, 0)), tmpS.setScalar(1)); starMesh.setMatrixAt(n++, tmpM); }
       }
       for (const g of [G.gH, G.gA]) { if (g.off) continue; blob(g.x, g.y, 6.5*(g.r/S.C.G_R)); if (g.stun > 0 && n < 37) for (let i=0;i<3;i++){ const a = t*5 + i*2.1; tmpM.compose(W(g.x + Math.cos(a)*1.8, g.y + Math.sin(a)*1.8, 2.4, tmpV), tmpQ.identity(), tmpS.setScalar(1)); starMesh.setMatrixAt(n++, tmpM); } }
       for (const Q of G.pucks) if (!Q.sunk && !Q.hold && !Q.ref) blob(Q.x, Q.y, 1.6);
