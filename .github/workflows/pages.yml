@@ -18,19 +18,18 @@ concurrency:
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
+    # Playwright's image ships Chromium and its system libraries, so there's no slow browser install.
+    # Keep the tag in step with the "playwright" version in package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.0-noble
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install Playwright
-        run: |
-          npm install --no-audit --no-fund
-          npx playwright install --with-deps chromium
+      - name: Install test dependencies
+        run: npm install --no-audit --no-fund
       - name: Serve the site and run the smoke test
         run: |
-          python3 -m http.server 8123 --bind 127.0.0.1 &
-          sleep 2
+          node tests/serve.mjs 8123 &
+          sleep 1
           npm test
 
   deploy:

@@ -27,6 +27,7 @@ A 3-on-3 mutant hockey brawler that runs in your browser. Lead the Rink Rats thr
 | Pass / switch player | Shift | X / LB | Pass button |
 | Power-up | E | B / RB | Power button |
 | Pause | P / Esc | Start / Menu | Pause button |
+| Feel tuning panel | ` (backtick) | Pause menu | Pause menu |
 
 Controllers use the standard browser gamepad mapping (Xbox, PlayStation and Switch Pro all work). The on-screen controls strip shows the buttons for whatever you're using. The right stick follows the camera.
 
@@ -39,6 +40,10 @@ Open **Graphics** in the locker room to pick a detail level (Auto, High, Medium,
 
 If the 3D view fails a startup check, the game steps down on its own: first lower detail, then WebGL2, then the classic view.
 
+## Feel tuning
+
+Press **`** (backtick) or open **Feel tuning** from the pause menu to get live sliders for skating (turn rates, hockey stops), the stick (speed, reach, puck grip), shooting and passing (wind-up, flick zone, shot speed, aim assist) and hits (knockdown threshold, knockback). The game keeps running while the panel is open, changes save in your browser, and **Copy values** puts your changes on the clipboard so they can become the new defaults in `js/game.js` (`TUNE_DEF`).
+
 ## Saves
 
 Progress is saved in your browser. To move it to another browser or device, open **Save data** in the locker room, copy your save code, then paste and load it on the other one.
@@ -48,7 +53,7 @@ Progress is saved in your browser. To move it to another browser or device, open
 No build step. Serve the folder with any static file server:
 
 ```bash
-python3 -m http.server 8123
+npm run serve            # or: python3 -m http.server 8123
 # open http://localhost:8123
 ```
 
@@ -61,7 +66,7 @@ Add `?debug` to the URL to expose test hooks (debug camera, renderer internals) 
 ```bash
 npm install
 npx playwright install chromium
-npm run serve &   # in another terminal
+npm run serve &
 npm test
 ```
 
@@ -77,6 +82,7 @@ js/render3d.js        three.js broadcast renderer (WebGPU / WebGL2, TSL node mat
 vendor/three/         three.js r180 (pinned, served locally)
 assets/               icon, social preview, screenshot
 tests/smoke.mjs       Playwright smoke test
+tests/serve.mjs       tiny static server (npm run serve)
 .github/workflows/    test + Pages deploy
 ```
 

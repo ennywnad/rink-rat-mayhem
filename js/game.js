@@ -130,7 +130,7 @@ try { const s = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (s && typeo
 let muted = false;
 try { muted = localStorage.getItem('rinkrat-mute') === '1'; } catch(e) {}
 let dbDoc = null, dbChain = Promise.resolve();
-const GAME_VERSION = 'v1.1.0';
+const GAME_VERSION = 'v1.2.0';
 // save codes: "RRM1." + base64url(JSON)
 function exportSave(){ const j = JSON.stringify({ ...save, updatedAt:Date.now() }); return 'RRM1.' + btoa(unescape(encodeURIComponent(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function importSave(code){
@@ -269,6 +269,45 @@ function buildHazards(hz){
 
 // one-time reset: a crowd shader bug in v14 forced WebGPU off and saved WebGL2 / a lower detail tier; undo that once
 try { if (!localStorage.getItem('rinkrat-gfx-fix15')) { if (localStorage.getItem('rinkrat-gfx-engine') === 'webgl') localStorage.removeItem('rinkrat-gfx-engine'); localStorage.removeItem('rinkrat-gfx-auto'); localStorage.setItem('rinkrat-gfx-fix15', '1'); } } catch(e) {}
+// ---------------- feel tuning (live sliders; saved in this browser)
+const DEG = Math.PI/180;
+const TUNE_DEF = [
+  ['Skating', [
+    ['carveSlow', 'Turn rate when slow', 2, 9, 0.1, 5.4, 'rad/s'],
+    ['carveFast', 'Turn rate at top speed', 1, 6, 0.1, 2.8, 'rad/s'],
+    ['carveBleed', 'Speed lost in turns', 0, 0.4, 0.01, 0.12, ''],
+    ['stopAngle', 'Hockey stop past', 70, 170, 1, 117, '°'],
+    ['stopBrake', 'Stop strength', 0.8, 4, 0.05, 1.9, '×'],
+  ]],
+  ['Stick', [
+    ['bladeAuto', 'Stick speed (auto)', 80, 500, 5, 210, ''],
+    ['bladeSkill', 'Stick speed (right stick)', 100, 800, 10, 300, ''],
+    ['bladeLimit', 'Max sweep with the puck', 4, 30, 0.5, 12, 'rad/s'],
+    ['reach', 'Stick reach', 1, 4, 0.05, 2.6, 'ft'],
+    ['grip', 'Puck grip', 8, 60, 1, 28, ''],
+    ['loseDist', 'Lose the puck when dragged', 2, 8, 0.1, 3.6, 'ft'],
+  ]],
+  ['Shooting and passing', [
+    ['windTime', 'Full pull-back wind-up', 0.15, 1.5, 0.05, 0.5, 's'],
+    ['backAngle', 'Pull-back zone starts at', 70, 160, 1, 109, '°'],
+    ['releaseAngle', 'Flick releases within', 15, 90, 1, 46, '°'],
+    ['shotMin', 'Quick-flick power', 0, 0.8, 0.01, 0.28, ''],
+    ['shotPower', 'Shot speed', 0.5, 1.8, 0.05, 1, '×'],
+    ['aimAssist', 'Aim assist', 0, 1, 0.05, 0.6, ''],
+    ['chargeTime', 'Button wind-up', 0.2, 1.5, 0.05, 0.75, 's'],
+    ['passSpeed', 'Pass speed', 0.5, 1.6, 0.05, 1, '×'],
+  ]],
+  ['Hits', [
+    ['knockPower', 'Knockdown threshold', 5, 80, 1, 30, ''],
+    ['knockback', 'Knockback', 0, 0.8, 0.01, 0.28, ''],
+    ['recoil', 'Checker keeps speed', 0.2, 1, 0.01, 0.72, '×'],
+  ]],
+];
+const TUNE = {};
+for (const [, items] of TUNE_DEF) for (const [k, , , , , d] of items) TUNE[k] = d;
+try { const t = JSON.parse(localStorage.getItem('rinkrat-tune') || 'null'); if (t) for (const k in t) if (k in TUNE && typeof t[k] === 'number') TUNE[k] = t[k]; } catch(e) {}
+const saveTune = () => { try { const ch = {}; for (const [, items] of TUNE_DEF) for (const [k, , , , , d] of items) if (TUNE[k] !== d) ch[k] = TUNE[k]; localStorage.setItem('rinkrat-tune', JSON.stringify(ch)); } catch(e) {} };
+
 // ---------------- rules, team attributes, practice config
 const ATTRS = [['speed','Speed'],['accel','Acceleration'],['shot','Shot power'],['check','Checking'],['handle','Puck control'],['goalie','Goalie']];
 const defAttrs = () => Object.fromEntries(ATTRS.map(([k]) => [k, 1]));
@@ -456,12 +495,12 @@ function hit(att, vic, power, nx, ny){
   if (vic.kaiju > 0 || vic.inv > 0) return;
   if (vic === ctrlSk()) rumble(Math.min(1, power/55), 0.6, 200); else if (att === ctrlSk()) rumble(Math.min(0.6, power/90), 0.7, 140);
   G.hits[att.team]++;
-  vic.vx += nx * (10 + power*0.28); vic.vy += ny * (10 + power*0.28);
-  const big = power >= 30;
+  vic.vx += nx * (10 + power*TUNE.knockback); vic.vy += ny * (10 + power*TUNE.knockback);
+  const big = power >= TUNE.knockPower;
   vic.stun = Math.max(vic.stun, big ? 0.95 + power/120 : 0.3 + power/170);
   if (big) vic.down = Math.max(vic.down || 0, vic.stun);
   vic.spin = (Math.random()<0.5?-1:1)*rand(1.2, 2.6)*(big ? 1 : 0.4);
-  att.check = 0.34; att.checkDir = Math.atan2(ny, nx); att.vx *= 0.72; att.vy *= 0.72;
+  att.check = 0.34; att.checkDir = Math.atan2(ny, nx); att.vx *= TUNE.recoil; att.vy *= TUNE.recoil;
   const ko = hurt(vic, power, att.team, 'hit');
   if (!ko && power > 28) pop((att.x+vic.x)/2, (att.y+vic.y)/2 - 3, pick(HIT_WORDS), '#ffb51e', 15 + Math.min(10, power/8), 0.9);
   burst(vic.x, vic.y, 8 + Math.floor(power/8), ['#ffffff','#ffd77a', SPECIES[vic.species].head], 18, 0.5, 0.5);
@@ -494,9 +533,9 @@ function bladeTarget(s){
   let a, r;
   if (m > 0.22) {
     const rel = angDiff(Math.atan2(v[1], v[0]), s.face);
-    if (own && Math.abs(angDiff(Math.atan2(v[1], v[0]), shotRef(s))) > 1.9) { a = Math.sign(rel || s.bl.a || 1)*BLADE_MAX; r = s.r + 0.9; }
+    if (own && Math.abs(angDiff(Math.atan2(v[1], v[0]), shotRef(s))) > TUNE.backAngle*DEG) { a = Math.sign(rel || s.bl.a || 1)*BLADE_MAX; r = s.r + 0.9; }
     else if (Math.abs(rel) > 1.95) { a = Math.sign(rel || s.bl.a || 1)*BLADE_MAX; r = s.r + 0.9; }   // pulled back: drag the puck behind the hip
-    else { a = rel; r = s.r + 0.6 + (rel < -0.4 ? 1.9 : 2.6)*Math.min(1, m); }   // backhand side reaches a little less
+    else { a = rel; r = s.r + 0.6 + (rel < -0.4 ? TUNE.reach*0.73 : TUNE.reach)*Math.min(1, m); }   // backhand side reaches a little less
   } else if (own) {
     const ph = G.time*5.4 + s.idx*1.7, sp = hyp(s.vx, s.vy), calm = 1 - Math.min(0.65, sp/42);
     a = 0.14 + Math.sin(ph)*0.34*calm + Math.sin(ph*0.37 + 1)*0.1; r = s.r + 1.5 + Math.cos(ph*0.5)*0.15;
@@ -521,7 +560,7 @@ function updBlade(s, h){
   const b = s.bl || (s.bl = { a:0.12, r:s.r + 1.7, va:0, vr:0, x:s.x, y:s.y, sp:0 });
   if (s.ko > 0) { b.x = s.x; b.y = s.y; b.sp = 0; return; }
   const [ta, tr] = bladeTarget(s), own = G.pucks[0].owner === s;
-  const k = s.relT > 0 ? 900 : s.skIn ? 300 : 210, c = 2*Math.sqrt(k), lim = s.relT > 0 ? 34 : own ? 12 : 20;
+  const k = s.relT > 0 ? 900 : s.skIn ? TUNE.bladeSkill : TUNE.bladeAuto, c = 2*Math.sqrt(k), lim = s.relT > 0 ? 34 : own ? TUNE.bladeLimit : Math.max(20, TUNE.bladeLimit);
   b.va = clamp(b.va + (k*(ta - b.a) - c*b.va)*h, -lim, lim); b.a = clamp(b.a + b.va*h, -BLADE_MAX, BLADE_MAX);
   b.vr += (k*(tr - b.r) - c*b.vr)*h; b.r = clamp(b.r + b.vr*h, s.r + 0.5, s.r + 5);
   const wa = s.face + b.a, nx = s.x + Math.cos(wa)*b.r, ny = s.y + Math.sin(wa)*b.r;
@@ -533,7 +572,7 @@ function assistAim(s, base){
   const tx = opp.x > CX ? PL+1.1 : PRt-1.1;
   const ta = Math.atan2(gy - P.y, tx - P.x), df = angDiff(ta, base);
   const front = s.team==='home' ? P.y > gy+2 : P.y < gy-2;
-  return front && Math.abs(df) < 0.6 ? base + df*0.6 : base;
+  return front && Math.abs(df) < 0.6 ? base + df*TUNE.aimAssist : base;
 }
 // "forward" for the skill stick: toward the net in the attacking half, otherwise where the skater faces,
 // so pulling the stick away from the net always loads a shot no matter which way you're skating
@@ -553,9 +592,9 @@ function skillShot(s, dt){
   }
   if (P.owner !== s || s.charging) { s.wind = 0; return; }
   const ref = shotRef(s), sa = m > 0.22 ? Math.atan2(v[1], v[0]) : ref, rel = angDiff(sa, ref);
-  if (m > 0.55 && Math.abs(rel) > 1.9) { s.wind = Math.min(1, (s.wind || 0) + dt/0.5); s.windT = 0.45; s.windAim = assistAim(s, ref); }
-  else if ((s.wind || 0) > 0.08 && m > 0.5 && Math.abs(rel) < 0.8) {
-    s.relPow = clamp(0.28 + 0.72*s.wind, 0, 1); s.relAng = assistAim(s, sa); s.relT = 0.16; s.wind = 0;
+  if (m > 0.55 && Math.abs(rel) > TUNE.backAngle*DEG) { s.wind = Math.min(1, (s.wind || 0) + dt/TUNE.windTime); s.windT = 0.45; s.windAim = assistAim(s, ref); }
+  else if ((s.wind || 0) > 0.08 && m > 0.5 && Math.abs(rel) < TUNE.releaseAngle*DEG) {
+    s.relPow = clamp(TUNE.shotMin + (1 - TUNE.shotMin)*s.wind, 0, 1); s.relAng = assistAim(s, sa); s.relT = 0.16; s.wind = 0;
   } else { s.windT = (s.windT || 0) - dt; if (s.windT <= 0) s.wind = Math.max(0, (s.wind || 0) - dt*2.5); }
 }
 const skillAim = s => { const v = s.skIn, m = v ? hyp(v[0], v[1]) : 0; if (m < 0.4) return null; const a = Math.atan2(v[1], v[0]); return Math.abs(angDiff(a, s.face)) < 1.4 ? assistAim(s, a) : null; };
@@ -575,15 +614,15 @@ function updSkater(s, ix, iy, h){
     // a hard reversal is a hockey stop, and from a near standstill they can push off any way they like
     const im = Math.min(1, hyp(ix, iy)), th = Math.atan2(iy, ix), sp = hyp(s.vx, s.vy), want = max*im;
     const vh = Math.atan2(s.vy, s.vx), dA = angDiff(th, vh);
-    if (sp > 7 && Math.abs(dA) < 2.05 && s.stun <= 0) {
-      const rate = (5.4 - 2.6*Math.min(1, sp/Math.max(1, max))) * (s.charging ? 0.75 : 1) * (G.low ? 0.55 : 1) * (s.rocket > 0 ? 0.75 : 1);
+    if (sp > 7 && Math.abs(dA) < TUNE.stopAngle*DEG && s.stun <= 0) {
+      const rate = (TUNE.carveSlow - (TUNE.carveSlow - TUNE.carveFast)*Math.min(1, sp/Math.max(1, max))) * (s.charging ? 0.75 : 1) * (G.low ? 0.55 : 1) * (s.rocket > 0 ? 0.75 : 1);
       const turnBy = clamp(dA, -rate*h, rate*h), nh = vh + turnBy;
       let ns = sp + clamp(want - sp, -acc*1.3*h, acc*h);
-      ns -= Math.abs(turnBy)*sp*0.12;                       // a hard carve bleeds a little speed
+      ns -= Math.abs(turnBy)*sp*TUNE.carveBleed;                       // a hard carve bleeds a little speed
       s.vx = Math.cos(nh)*ns; s.vy = Math.sin(nh)*ns;
       s.face = turn(s.face, vh + clamp(dA, -0.55, 0.55), 9*h);   // look into the turn, not past it
     } else if (sp > 7 && s.stun <= 0) {
-      const ns = Math.max(0, sp - acc*1.9*h);                // hockey stop
+      const ns = Math.max(0, sp - acc*TUNE.stopBrake*h);                // hockey stop
       s.vx = s.vx/sp*ns; s.vy = s.vy/sp*ns;
       s.face = turn(s.face, th, 6*h);
     } else {
@@ -689,7 +728,7 @@ function shoot(s, power, ang){
   const P = G.pucks[0];
   if (P.owner !== s) { s.charging = false; return; }
   if (ang == null) ang = aimAngle(s);
-  let sp = (46 + 74*power)*attrOf(s.team, 'shot');
+  let sp = (46 + 74*power)*attrOf(s.team, 'shot')*TUNE.shotPower;
   const armed = G.armed[s.team]; G.armed[s.team] = null;
   if (armed && armed.type === 'fireball') sp *= 1.3;
   P.owner = null; P.vx = Math.cos(ang)*sp + s.vx*0.3; P.vy = Math.sin(ang)*sp + s.vy*0.3; s.wind = 0; s.recv = 0;
@@ -720,7 +759,7 @@ function passPuck(s, pref){
     for (const o of G.sk) { if (o.team === s.team || o.ko > 0) continue; const t = clamp(((o.x-s.x)*(m.x-s.x)+(o.y-s.y)*(m.y-s.y))/(d*d), 0, 1); const qx=s.x+(m.x-s.x)*t, qy=s.y+(m.y-s.y)*t; if (hyp(o.x-qx, o.y-qy) < 4) sc += 18; }
     if (sc < bs) { bs = sc; best = m; }
   }
-  const d = hyp(best.x-s.x, best.y-s.y), sp = clamp(38 + d*0.85, 44, 82), lt = d/sp;
+  const d = hyp(best.x-s.x, best.y-s.y), sp = clamp(38 + d*0.85, 44, 82)*TUNE.passSpeed, lt = d/sp;
   const tx = best.x + best.vx*lt*0.85, ty = best.y + best.vy*lt*0.85, a = Math.atan2(ty-P.y, tx-P.x);
   P.owner = null; P.vx = Math.cos(a)*sp; P.vy = Math.sin(a)*sp; P.passTo = best; P.passT = 1.4; P.shotBy = null; P.last = s.team; P.team = s.team;
   P.icing = (s.team === 'home' ? P.y > 100 : P.y < 100) ? s.team : null;
@@ -854,9 +893,9 @@ function stepPuck(P, h){
   const py = P.y;
   if (P.owner) {
     const s = P.owner, [bx, by] = stickPt(s), tx = bx + Math.cos(s.face)*0.55, ty = by + Math.sin(s.face)*0.55;
-    const k = Math.min(1, h*(s.recv > 0 ? 10 : 28)), nx = P.x + (tx-P.x)*k, ny = P.y + (ty-P.y)*k;
+    const k = Math.min(1, h*(s.recv > 0 ? 10 : TUNE.grip)), nx = P.x + (tx-P.x)*k, ny = P.y + (ty-P.y)*k;
     P.vx = (nx - P.x)/h; P.vy = (ny - P.y)/h; P.x = nx; P.y = ny;
-    if (s.recv <= 0 && hyp(tx - P.x, ty - P.y) > 3.6) { P.owner = null; s.cool = 0.3; s.charging = false; P.vx = s.vx*0.6; P.vy = s.vy*0.6; }
+    if (s.recv <= 0 && hyp(tx - P.x, ty - P.y) > TUNE.loseDist) { P.owner = null; s.cool = 0.3; s.charging = false; P.vx = s.vx*0.6; P.vy = s.vy*0.6; }
   } else {
     P.x += P.vx*h; P.y += P.vy*h;
     let fr = G.low ? 0.1 : 0.32;
@@ -1389,6 +1428,7 @@ holdBtn($('bPower'), () => { if (playing()) usePower('home'); });
 window.addEventListener('keydown', e => {
   const inGame = G && !G.attract && G.state !== 'end';
   if (inGame && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  if (e.code === 'Backquote' && !e.repeat) { toggleTune(); return; }
   if (e.code === 'KeyP' || e.code === 'Escape') { if (inGame && !paused) setPaused(true); else if (paused) setPaused(false); return; }
   if (!inGame || paused) return;
   if (e.code === 'Space') { if (!e.repeat) { ensureAudio(); pressShoot(); } return; }
@@ -1481,7 +1521,7 @@ function padLabels(){
 function ctrlItems(){
   if (pad.g) { const L = padLabels(); return { src:L.name, items:[[[L.stick, L.dpad], 'Skate'], [[L.rstick], 'Stickhandle · pull back, flick to shoot'], [[L.a, L.rt], 'Shoot (hold) · check'], [[L.x, L.lb], 'Pass · switch'], [[L.b, L.rb], 'Power-up'], [[L.start], 'Pause']] }; }
   if (matchMedia('(pointer:coarse)').matches) return { src:'Touch', items:[[['Left side'], 'Drag to skate'], [['Shoot'], 'Hold · tap to check'], [['Pass'], 'Pass · switch'], [['Power'], 'Power-up']] };
-  return { src:'Keyboard', items:[[['WASD', 'Arrows'], 'Skate'], [['IJKL'], 'Stickhandle · pull back, flick to shoot'], [['Space'], 'Shoot (hold) · check'], [['Shift'], 'Pass · switch'], [['E'], 'Power-up'], [['P'], 'Pause']] };
+  return { src:'Keyboard', items:[[['WASD', 'Arrows'], 'Skate'], [['IJKL'], 'Stickhandle · pull back, flick to shoot'], [['Space'], 'Shoot (hold) · check'], [['Shift'], 'Pass · switch'], [['E'], 'Power-up'], [['P'], 'Pause'], [['`'], 'Tuning']] };
 }
 function keyHtml(k){
   if (typeof k === 'string') return `<kbd>${k}</kbd>`;
@@ -1549,7 +1589,7 @@ function update(dt){
   if (cs && G.state === 'play') skillShot(cs, dt);
   { const P = G.pucks[0], o = P.owner;   // AI puck carriers deke when a defender closes in front of them
     if (o && o !== cs && (o.dk || 0) <= 0 && G.state === 'play') for (const d of G.sk) { if (d.team === o.team || d.ko > 0) continue; const dx = d.x - o.x, dy = d.y - o.y, dd = hyp(dx, dy); if (dd < 9 && Math.abs(angDiff(Math.atan2(dy, dx), o.face)) < 0.9 && Math.random() < dt*2.2) { o.dk = rand(0.3, 0.45); o.dkA = (o.dkA || 1) > 0 ? -1.15 : 1.15; break; } } }
-  if (cs && cs.charging) cs.charge = Math.min(1, cs.charge + dt/0.75);
+  if (cs && cs.charging) cs.charge = Math.min(1, cs.charge + dt/TUNE.chargeTime);
   if (cs && G.pucks[0].owner !== cs) cs.charging = false;
   const P0 = G.pucks[0]; if (P0.passTo) { P0.passT -= dt; if (P0.passT <= 0 || P0.owner) P0.passTo = null; }
   const inputs = G.sk.map(s => G.state === 'regroup' ? regroupInput(s, cs) : (s === cs && G.state === 'play') ? readInput() : (G.state === 'play' ? aiSkater(s, dt) : [0,0]));
@@ -2293,6 +2333,34 @@ function showResults(r){
   if ($('resKit')) $('resKit').onclick = () => { selected = nIdx; openKit('brief'); };
   $('resHub').onclick = () => { renderHub(); show('hub'); startAttract(); };
 }
+// ---------------- feel tuning panel (` key or the pause menu); the game keeps running while it's open
+function buildTunePanel(){
+  let el = $('tune');
+  if (!el) { el = document.createElement('aside'); el.id = 'tune'; el.className = 'tune'; el.hidden = true; el.setAttribute('aria-label', 'Feel tuning'); stage.appendChild(el); }
+  const fmt = (v, st) => st >= 1 ? String(Math.round(v)) : st >= 0.1 ? v.toFixed(1) : v.toFixed(2);
+  el.innerHTML = `<div class="tune-head"><b>Feel tuning</b><span>live · saved in this browser</span><button class="ib" id="tuneClose" type="button" aria-label="Close tuning">×</button></div>
+    <div class="tune-body">${TUNE_DEF.map(([grp, items]) => `<h4>${grp}</h4>` + items.map(([k, label, mn, mx, st, d, unit]) => `
+      <label class="trow${TUNE[k] !== d ? ' changed' : ''}" data-k="${k}"><span class="tl">${label}</span><input type="range" min="${mn}" max="${mx}" step="${st}" value="${TUNE[k]}" data-k="${k}" data-st="${st}" data-d="${d}"><span class="tv">${fmt(TUNE[k], st)}${unit && unit !== '°' && unit !== '×' ? ' ' : ''}${unit}</span></label>`).join('')).join('')}</div>
+    <div class="tune-foot"><button class="btn ghost small" id="tuneCopy" type="button">Copy values</button><button class="btn ghost small" id="tuneReset" type="button">Reset all</button><span id="tuneMsg" aria-live="polite"></span></div>`;
+  el.querySelectorAll('input[type=range]').forEach(inp => {
+    const k = inp.dataset.k, st = Number(inp.dataset.st), unit = TUNE_DEF.flatMap(g => g[1]).find(x => x[0] === k)[6];
+    inp.oninput = () => { TUNE[k] = Number(inp.value); inp.nextElementSibling.textContent = fmt(TUNE[k], st) + (unit && unit !== '°' && unit !== '×' ? ' ' : '') + unit; inp.parentElement.classList.toggle('changed', TUNE[k] !== Number(inp.dataset.d)); saveTune(); };
+    inp.onchange = () => inp.blur();   // hand the keyboard straight back to the game
+    inp.addEventListener('pointerup', () => setTimeout(() => inp.blur(), 0));
+  });
+  $('tuneClose').onclick = () => toggleTune(false);
+  $('tuneReset').onclick = () => { for (const [, items] of TUNE_DEF) for (const [k, , , , , d] of items) TUNE[k] = d; saveTune(); buildTunePanel(); $('tune').hidden = false; $('tuneMsg').textContent = 'Back to defaults.'; };
+  $('tuneCopy').onclick = async () => {
+    const ch = {}; for (const [, items] of TUNE_DEF) for (const [k, , , , , d] of items) if (TUNE[k] !== d) ch[k] = TUNE[k];
+    const txt = JSON.stringify(ch, null, 1); let ok = false; try { await navigator.clipboard.writeText(txt); ok = true; } catch(e) {}
+    $('tuneMsg').textContent = ok ? (Object.keys(ch).length ? 'Copied your changes.' : 'Nothing changed yet.') : txt;
+  };
+}
+function toggleTune(on){
+  if (!$('tune')) buildTunePanel();
+  const el = $('tune'); el.hidden = on == null ? !el.hidden : !on;
+  if (!el.hidden && paused && G && !G.attract && G.state !== 'end') setPaused(false);
+}
 function preparePause(over){
   const pr = !!G.practice;
   $('btnPracSet').hidden = false;
@@ -2312,6 +2380,7 @@ function setPaused(p){
 $('btnPause').onclick = () => setPaused(!paused);
 $('btnResume').onclick = () => setPaused(false);
 $('btnRestart').onclick = () => { paused = false; if (G && G.practice) startPractice(); else startChallenge(selected); };
+$('btnTune').onclick = () => toggleTune(true);
 $('btnPracSet').onclick = () => { if (G && G.practice) openPractice(true); else openGameCfg('pause'); };
 $('btnQuit').onclick = () => { paused = false; renderHub(); show('hub'); startAttract(); };
 function syncSound(){ $('btnSound').setAttribute('aria-pressed', String(muted)); $('btnSound').setAttribute('aria-label', muted ? 'Turn sound on' : 'Mute sound'); $('icoOn').hidden = muted; $('icoOff').hidden = !muted; }
