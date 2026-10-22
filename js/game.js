@@ -130,7 +130,7 @@ try { const s = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (s && typeo
 let muted = false;
 try { muted = localStorage.getItem('rinkrat-mute') === '1'; } catch(e) {}
 let dbDoc = null, dbChain = Promise.resolve();
-const GAME_VERSION = 'v1.2.0';
+const GAME_VERSION = 'v1.3.0';
 // save codes: "RRM1." + base64url(JSON)
 function exportSave(){ const j = JSON.stringify({ ...save, updatedAt:Date.now() }); return 'RRM1.' + btoa(unescape(encodeURIComponent(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function importSave(code){
@@ -169,18 +169,85 @@ function persist(){
 })();
 
 // ---------------- audio
-let AC = null, noise = null;
+// Sample pack in assets/sfx (built by tools/gen_sfx.py). Mixer: effects + crowd buses -> compressor -> master volume.
+// If a sample hasn't loaded (or fails), the old synthesised version plays instead.
+let AC = null, noise = null, master = null, sfxBus = null, crowdBus = null, crowdGain = null, crowdSrc = null;
+let volume = 0.8, crowdVol = 0.6;
+try { const v = parseFloat(localStorage.getItem('rinkrat-vol')); if (v >= 0 && v <= 1) volume = v; const c = parseFloat(localStorage.getItem('rinkrat-crowdvol')); if (c >= 0 && c <= 1) crowdVol = c; } catch(e) {}
+const SFX_SET = { stick:4, shot:3, slap:3, board:3, post:2, pad:3, check:3, skate:4, stop:2, whistle:1, horn:1, buzzer:1, boom:1, splash:1, fire:1, zap:1, thunder:1, freeze:1, grow:1, rocket:1, saw:1, pickup:1, ko:1, level:1, cheer:1, aww:1, crowd:1 };
+const SFX_GAIN = { stick:0.5, shot:0.7, slap:0.85, board:0.7, post:0.55, pad:0.6, check:0.85, skate:0.16, stop:0.32, whistle:0.42, horn:0.5, buzzer:0.45, boom:0.8, splash:0.6, fire:0.55, zap:0.5, thunder:0.75, freeze:0.5, grow:0.6, rocket:0.55, saw:0.45, pickup:0.45, ko:0.55, level:0.5, cheer:0.75, aww:0.55 };
+const SFX_GAP = { skate:0.1, stick:0.04, cheer:1.5, aww:1.5 };
+const NO_PITCH = new Set(['whistle', 'horn', 'buzzer', 'level', 'pickup', 'cheer', 'aww']);
+const sfxRaw = {}, sfxBuf = {}, sfxLast = {};
+// fetch the bytes right away; decode once the audio context exists (after the first tap / key / button)
+for (const [name, n] of Object.entries(SFX_SET)) for (let i=0;i<n;i++) {
+  const key = `${name}_${i}`;
+  sfxRaw[key] = fetch(`assets/sfx/${key}.mp3`).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null);
+}
+let sfxDecoding = false;
+function decodeSfx(){
+  if (sfxDecoding || !AC) return; sfxDecoding = true;
+  for (const [name, n] of Object.entries(SFX_SET)) for (let i=0;i<n;i++) {
+    sfxRaw[`${name}_${i}`].then(ab => ab && new Promise((res, rej) => AC.decodeAudioData(ab, res, rej))).then(buf => {
+      if (!buf) return; (sfxBuf[name] || (sfxBuf[name] = [])).push(buf);
+      if (name === 'crowd') startCrowd();
+    }).catch(() => {});
+  }
+}
 function ensureAudio(){
-  if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { AC = null; } }
+  if (!AC) {
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { AC = null; }
+    if (AC) {
+      const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.25;
+      master = AC.createGain(); master.gain.value = muted ? 0 : volume;
+      sfxBus = AC.createGain(); crowdBus = AC.createGain(); crowdBus.gain.value = crowdVol;
+      sfxBus.connect(comp); crowdBus.connect(comp); comp.connect(master); master.connect(AC.destination);
+      decodeSfx();
+    }
+  }
   if (AC && AC.state === 'suspended') AC.resume().catch(()=>{});
   if (AC && !noise) { noise = AC.createBuffer(1, AC.sampleRate, AC.sampleRate); const d = noise.getChannelData(0); for (let i=0;i<d.length;i++) d[i] = Math.random()*2-1; }
+}
+function applyVolume(){
+  if (!AC) return; const t = AC.currentTime;
+  master.gain.setTargetAtTime(muted ? 0 : volume, t, 0.03); crowdBus.gain.setTargetAtTime(crowdVol, t, 0.05);
+}
+function startCrowd(){
+  if (crowdSrc || !sfxBuf.crowd) return;
+  crowdSrc = AC.createBufferSource(); crowdSrc.buffer = sfxBuf.crowd[0]; crowdSrc.loop = true;
+  crowdGain = AC.createGain(); crowdGain.gain.value = 0; crowdSrc.connect(crowdGain); crowdGain.connect(crowdBus); crowdSrc.start();
+}
+// crowd murmur swells when the puck is near a net and dips when the game is paused
+function updateCrowd(){
+  if (!crowdGain) return;
+  let target = 0.12;
+  if (G && !G.attract) {
+    if (paused || G.state === 'end') target = 0.06;
+    else { const P = G.pucks[0], dn = Math.min(Math.abs(P.y - GT), Math.abs(P.y - GB)); target = 0.24 + 0.4*clamp(1 - dn/45, 0, 1) + (G.goalLight ? 0.25 : 0); }
+  }
+  crowdGain.gain.setTargetAtTime(target, AC.currentTime, 0.5);
+}
+function playSample(name, gain, rate){
+  const list = sfxBuf[name]; if (!list || !list.length) return false;
+  let i = Math.floor(Math.random()*list.length); if (list.length > 1 && i === sfxLast[name]) i = (i + 1) % list.length; sfxLast[name] = i;
+  const src = AC.createBufferSource(); src.buffer = list[i]; src.playbackRate.value = rate;
+  const g = AC.createGain(); g.gain.value = gain; src.connect(g); g.connect(sfxBus); src.start();
+  return true;
 }
 const lastSfx = {};
 function sfx(type, v=1){
   if (!AC || muted || (G && G.attract)) return;
   const t = AC.currentTime;
-  if (lastSfx[type] && t - lastSfx[type] < 0.05) return; lastSfx[type] = t;
-  const out = AC.destination;
+  if (lastSfx[type] && t - lastSfx[type] < (SFX_GAP[type] || 0.05)) return; lastSfx[type] = t;
+  let name = type, g = 1;
+  if (type === 'shot') { name = v > 0.62 ? 'slap' : 'shot'; g = 0.75 + 0.35*Math.min(1, v); }
+  else if (type === 'board') g = clamp(v/40, 0.25, 1.1);
+  else if (type === 'pad' || type === 'stick' || type === 'skate' || type === 'stop') g = clamp(v, 0.3, 1.1);
+  if (playSample(name, (SFX_GAIN[name] || 0.5)*g, NO_PITCH.has(name) ? 1 : 0.95 + Math.random()*0.1)) return;
+  synthSfx(type, v);
+}
+function synthSfx(type, v){
+  const t = AC.currentTime, out = sfxBus;
   const burst = (dur, ft, freq, q, gain, f2) => {
     const s = AC.createBufferSource(); s.buffer = noise;
     const f = AC.createBiquadFilter(); f.type = ft; f.frequency.setValueAtTime(freq, t); if (f2) f.frequency.exponentialRampToValueAtTime(f2, t+dur); f.Q.value = q;
@@ -609,6 +676,7 @@ function updSkater(s, ix, iy, h){
   if (s.slowed) max *= 0.55;
   if (G.low) acc *= 0.62;
   if (s.rocket > 0 && !ix && !iy && s.stun <= 0 && s.frozen <= 0) { ix = Math.cos(s.face); iy = Math.sin(s.face); }
+  if (!(ix || iy) || hyp(s.vx, s.vy) <= 7) s.braking = false;
   if (ix || iy) {
     // skaters carve: at speed the velocity swings toward the stick direction along an arc (tighter when slow),
     // a hard reversal is a hockey stop, and from a near standstill they can push off any way they like
@@ -622,6 +690,8 @@ function updSkater(s, ix, iy, h){
       s.vx = Math.cos(nh)*ns; s.vy = Math.sin(nh)*ns;
       s.face = turn(s.face, vh + clamp(dA, -0.55, 0.55), 9*h);   // look into the turn, not past it
     } else if (sp > 7 && s.stun <= 0) {
+      if (!s.braking && s === ctrlSk()) sfx('stop', Math.min(1.1, sp/24));
+      s.braking = true;
       const ns = Math.max(0, sp - acc*TUNE.stopBrake*h);                // hockey stop
       s.vx = s.vx/sp*ns; s.vy = s.vy/sp*ns;
       s.face = turn(s.face, th, 6*h);
@@ -1000,15 +1070,15 @@ function scoreGoal(tm, P){
     if (!g.off) { P.hold = g; g.hold = 1.1; P.vx = P.vy = 0; P.shotBy = null; P.passTo = null; }
     else Object.assign(P, { x:CX + rand(-3, 3), y: tm === 'home' ? GT + 14 : GB - 14, vx:rand(-5, 5), vy: tm === 'home' ? 16 : -16, shotBy:null, passTo:null });
     burst(CX, tm === 'home' ? GT : GB, 30, ['#ffb51e','#ec3b4f','#ffffff'], 26, 0.7, 1);
-    if (tm === 'home') { rumble(0.6, 0.9, 380); toast('GOAL', 'Play on', 1500, 'goal'); sfx('horn'); }
-    else { toast(G.ch.opp.abbr + ' score', 'Play on', 1300, 'small bad'); sfx('whistle'); }
+    if (tm === 'home') { rumble(0.6, 0.9, 380); toast('GOAL', 'Play on', 1500, 'goal'); sfx('horn'); sfx('cheer'); }
+    else { toast(G.ch.opp.abbr + ' score', 'Play on', 1300, 'small bad'); sfx('whistle'); sfx('aww'); }
     return;
   }
   G.state = 'goal'; G.stT = 3; G.goalLight = { team:tm, t:0 };
   const gy = tm === 'home' ? GT : GB;
   burst(CX, gy, 40, ['#ffb51e','#ec3b4f','#ffffff'], 30, 0.8, 1.2); shake(1.6);
-  if (tm === 'home') { rumble(0.7, 1, 450); toast('GOAL', powered ? 'Power-up goal' : `${G.score.home}–${G.score.away}`, 2700, 'goal'); sfx('horn'); }
-  else { toast(G.ch.opp.abbr + ' score', `${G.score.home}–${G.score.away}`, 2400, 'small bad'); sfx('whistle'); }
+  if (tm === 'home') { rumble(0.7, 1, 450); toast('GOAL', powered ? 'Power-up goal' : `${G.score.home}–${G.score.away}`, 2700, 'goal'); sfx('horn'); sfx('cheer'); }
+  else { toast(G.ch.opp.abbr + ' score', `${G.score.home}–${G.score.away}`, 2400, 'small bad'); sfx('whistle'); sfx('aww'); }
   if (!G.attract) checkObjLive();
 }
 function endMatch(){
@@ -1429,6 +1499,7 @@ window.addEventListener('keydown', e => {
   const inGame = G && !G.attract && G.state !== 'end';
   if (inGame && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   if (e.code === 'Backquote' && !e.repeat) { toggleTune(); return; }
+  if (e.code === 'KeyM' && !e.repeat && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) { setMuted(!muted); return; }
   if (e.code === 'KeyP' || e.code === 'Escape') { if (inGame && !paused) setPaused(true); else if (paused) setPaused(false); return; }
   if (!inGame || paused) return;
   if (e.code === 'Space') { if (!e.repeat) { ensureAudio(); pressShoot(); } return; }
@@ -1521,7 +1592,7 @@ function padLabels(){
 function ctrlItems(){
   if (pad.g) { const L = padLabels(); return { src:L.name, items:[[[L.stick, L.dpad], 'Skate'], [[L.rstick], 'Stickhandle · pull back, flick to shoot'], [[L.a, L.rt], 'Shoot (hold) · check'], [[L.x, L.lb], 'Pass · switch'], [[L.b, L.rb], 'Power-up'], [[L.start], 'Pause']] }; }
   if (matchMedia('(pointer:coarse)').matches) return { src:'Touch', items:[[['Left side'], 'Drag to skate'], [['Shoot'], 'Hold · tap to check'], [['Pass'], 'Pass · switch'], [['Power'], 'Power-up']] };
-  return { src:'Keyboard', items:[[['WASD', 'Arrows'], 'Skate'], [['IJKL'], 'Stickhandle · pull back, flick to shoot'], [['Space'], 'Shoot (hold) · check'], [['Shift'], 'Pass · switch'], [['E'], 'Power-up'], [['P'], 'Pause'], [['`'], 'Tuning']] };
+  return { src:'Keyboard', items:[[['WASD', 'Arrows'], 'Skate'], [['IJKL'], 'Stickhandle · pull back, flick to shoot'], [['Space'], 'Shoot (hold) · check'], [['Shift'], 'Pass · switch'], [['E'], 'Power-up'], [['P'], 'Pause'], [['M'], 'Mute'], [['`'], 'Tuning']] };
 }
 function keyHtml(k){
   if (typeof k === 'string') return `<kbd>${k}</kbd>`;
@@ -1590,6 +1661,11 @@ function update(dt){
   { const P = G.pucks[0], o = P.owner;   // AI puck carriers deke when a defender closes in front of them
     if (o && o !== cs && (o.dk || 0) <= 0 && G.state === 'play') for (const d of G.sk) { if (d.team === o.team || d.ko > 0) continue; const dx = d.x - o.x, dy = d.y - o.y, dd = hyp(dx, dy); if (dd < 9 && Math.abs(angDiff(Math.atan2(dy, dx), o.face)) < 0.9 && Math.random() < dt*2.2) { o.dk = rand(0.3, 0.45); o.dkA = (o.dkA || 1) > 0 ? -1.15 : 1.15; break; } } }
   if (cs && cs.charging) cs.charge = Math.min(1, cs.charge + dt/TUNE.chargeTime);
+  if (cs && !G.attract && cs.ko <= 0 && cs.stun <= 0 && cs.frozen <= 0) {   // stride sounds
+    const csp = hyp(cs.vx, cs.vy), [ix, iy] = readInput();
+    cs.strideT = (cs.strideT || 0) - dt;
+    if (csp > 9 && (ix || iy) && !cs.braking && cs.strideT <= 0) { sfx('skate', 0.55 + csp/50); cs.strideT = 0.44 - Math.min(0.2, csp/130); }
+  }
   if (cs && G.pucks[0].owner !== cs) cs.charging = false;
   const P0 = G.pucks[0]; if (P0.passTo) { P0.passT -= dt; if (P0.passT <= 0 || P0.owner) P0.passTo = null; }
   const inputs = G.sk.map(s => G.state === 'regroup' ? regroupInput(s, cs) : (s === cs && G.state === 'play') ? readInput() : (G.state === 'play' ? aiSkater(s, dt) : [0,0]));
@@ -2062,6 +2138,7 @@ function setGfx(p){
   refreshGfx();
 }
 window.__sim = {
+  audio: () => ({ ctx: AC ? AC.state : null, loaded: Object.values(sfxBuf).reduce((n, l) => n + l.length, 0), crowd: !!crowdSrc, muted, volume, crowdVol }),
   get G(){ return G; }, ctrlSk, stickPt, aimAngle, HOME, SPECIES,
   C:{ RW, RL, CR, CX, GT, GB, PL, PRt, ND, PUCK_R, SK_R, G_R },
   stageW: () => cw, stageH: () => ch,
@@ -2083,6 +2160,7 @@ function frame(t){
   const dt = Math.min(0.05, (t - last)/1000 || 0); last = t;
   try { pollPad(); } catch(e) {}
   if (!paused) update(dt);
+  try { updateCrowd(); } catch(e) {}
   const R3 = window.__r3d;
   let drew = false;
   if (R3 && R3.active) {
@@ -2129,6 +2207,10 @@ function renderHub(){
         <span class="cinfo"><span class="arena">${c.arena.toUpperCase()}</span><span class="ct">${c.title}</span><span class="co">${condText(c.obj, c)} · vs ${c.opp.name}</span></span>
         ${ul ? starsHtml(starsOf(c.id)) : `<span class="lock">Clear ${CHALLENGES[i-1].title} to unlock</span>`}</button>`; }).join('')}
     </div>
+    <div class="card gfx"><h3 class="h">Sound</h3>
+      <label class="tog"><input type="checkbox" id="sndOn" ${muted ? '' : 'checked'}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Sound</b><small>Also the speaker button in the scoreboard, or press M</small></span></label>
+      <label class="sl home snd"><span>Volume</span><input type="range" id="sndVol" min="0" max="100" step="5" value="${Math.round(volume*100)}"><b id="sndVolV">${Math.round(volume*100)}%</b></label>
+      <label class="sl home snd"><span>Crowd</span><input type="range" id="sndCrowd" min="0" max="100" step="5" value="${Math.round(crowdVol*100)}"><b id="sndCrowdV">${Math.round(crowdVol*100)}%</b></label></div>
     <div class="card gfx"><h3 class="h">Graphics</h3><div class="seg" id="gfxSeg">${GFX_OPTS.map(([k,l]) => `<button type="button" data-g="${k}" aria-pressed="${k===gfxPref}">${l}</button>`).join('')}</div><h3 class="h" style="margin-top:6px">3D engine</h3><div class="seg" id="engSeg">${[['webgpu','WebGPU'],['webgl','WebGL2 (compatibility)']].map(([k,l]) => `<button type="button" data-e="${k}" aria-pressed="${k===gfxEngine()}">${l}</button>`).join('')}</div><p class="gfxnote" id="gfxNote">${gfxStatusText()}</p></div>
     <p class="foot">Power-ups drop in yellow crates on the ice. Grab one and fire it from the power button.</p>
     <div class="card gfx"><h3 class="h">Save data</h3>
@@ -2141,6 +2223,10 @@ function renderHub(){
   requestAnimationFrame(() => { const x = $('hubXp'); if (x) x.style.width = (li.into/li.need*100).toFixed(1) + '%'; });
   $('btnKit').onclick = () => openKit('hub');
   document.querySelectorAll('#gfxSeg button').forEach(b => b.onclick = () => setGfx(b.dataset.g));
+  $('sndOn').onchange = e => setMuted(!e.target.checked);
+  $('sndVol').oninput = e => { volume = Number(e.target.value)/100; $('sndVolV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-vol', String(volume)); } catch(err) {} ensureAudio(); applyVolume(); };
+  $('sndCrowd').oninput = e => { crowdVol = Number(e.target.value)/100; $('sndCrowdV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-crowdvol', String(crowdVol)); } catch(err) {} ensureAudio(); applyVolume(); };
+  $('sndVol').onchange = () => { sfx('stick', 1); };
   $('saveCopy').onclick = async () => {
     const code = exportSave(); $('saveCode').value = code;
     let ok = false; try { await navigator.clipboard.writeText(code); ok = true; } catch(e) {}
@@ -2383,8 +2469,14 @@ $('btnRestart').onclick = () => { paused = false; if (G && G.practice) startPrac
 $('btnTune').onclick = () => toggleTune(true);
 $('btnPracSet').onclick = () => { if (G && G.practice) openPractice(true); else openGameCfg('pause'); };
 $('btnQuit').onclick = () => { paused = false; renderHub(); show('hub'); startAttract(); };
-function syncSound(){ $('btnSound').setAttribute('aria-pressed', String(muted)); $('btnSound').setAttribute('aria-label', muted ? 'Turn sound on' : 'Mute sound'); $('icoOn').hidden = muted; $('icoOff').hidden = !muted; }
-$('btnSound').onclick = () => { muted = !muted; ensureAudio(); try { localStorage.setItem('rinkrat-mute', muted ? '1' : '0'); } catch(e) {} syncSound(); };
+function syncSound(){
+  $('btnSound').setAttribute('aria-pressed', String(muted)); $('btnSound').setAttribute('aria-label', muted ? 'Turn sound on' : 'Mute sound'); $('icoOn').hidden = muted; $('icoOff').hidden = !muted;
+  const pm = $('btnMute'); if (pm) pm.textContent = muted ? 'Sound: off' : 'Sound: on';
+  const hm = $('sndOn'); if (hm) hm.checked = !muted;
+}
+function setMuted(m){ muted = !!m; ensureAudio(); applyVolume(); try { localStorage.setItem('rinkrat-mute', muted ? '1' : '0'); } catch(e) {} syncSound(); if (G && !G.attract) toast(muted ? 'Sound off' : 'Sound on', '', 900, 'small'); }
+$('btnSound').onclick = () => setMuted(!muted);
+$('btnMute').onclick = () => setMuted(!muted);
 syncSound();
 $('btnCtrls').onclick = () => { ctrlBarOn = !ctrlBarOn; try { localStorage.setItem('rinkrat-ctrlbar', ctrlBarOn ? '1' : '0'); } catch(e) {} renderCtrlBar(); };
 renderCtrlBar();
