@@ -130,7 +130,7 @@ try { const s = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (s && typeo
 let muted = false;
 try { muted = localStorage.getItem('rinkrat-mute') === '1'; } catch(e) {}
 let dbDoc = null, dbChain = Promise.resolve();
-const GAME_VERSION = 'v1.3.0';
+const GAME_VERSION = 'v1.4.0';
 // save codes: "RRM1." + base64url(JSON)
 function exportSave(){ const j = JSON.stringify({ ...save, updatedAt:Date.now() }); return 'RRM1.' + btoa(unescape(encodeURIComponent(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function importSave(code){
@@ -207,6 +207,10 @@ function ensureAudio(){
   }
   if (AC && AC.state === 'suspended') AC.resume().catch(()=>{});
   if (AC && !noise) { noise = AC.createBuffer(1, AC.sampleRate, AC.sampleRate); const d = noise.getChannelData(0); for (let i=0;i<d.length;i++) d[i] = Math.random()*2-1; }
+}
+function applyA11y(){
+  app.dataset.btn = A11Y.btn; document.body.classList.toggle('rm', !!A11Y.rm);
+  JR = A11Y.btn === 'xl' ? 66 : A11Y.btn === 'large' ? 56 : 46;
 }
 function applyVolume(){
   if (!AC) return; const t = AC.currentTime;
@@ -338,6 +342,14 @@ function buildHazards(hz){
 try { if (!localStorage.getItem('rinkrat-gfx-fix15')) { if (localStorage.getItem('rinkrat-gfx-engine') === 'webgl') localStorage.removeItem('rinkrat-gfx-engine'); localStorage.removeItem('rinkrat-gfx-auto'); localStorage.setItem('rinkrat-gfx-fix15', '1'); } } catch(e) {}
 // ---------------- feel tuning (live sliders; saved in this browser)
 const DEG = Math.PI/180;
+// ---------------- accessibility (saved per browser)
+const A11Y = { cb:false, rm: !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches), btn: (window.matchMedia && matchMedia('(pointer:coarse)').matches) ? 'large' : 'normal' };
+try { const a = JSON.parse(localStorage.getItem('rinkrat-a11y') || 'null'); if (a) Object.assign(A11Y, a); } catch(e) {}
+const saveA11y = () => { try { localStorage.setItem('rinkrat-a11y', JSON.stringify(A11Y)); } catch(e) {} };
+const CB_AWAY = { jersey:'#1f6fe0', trim:'#f2f2f2' };
+// colour-blind friendly matchups: Rats stay amber and black, every opponent wears blue and white
+function paletteFor(ch){ return A11Y.cb ? { ...ch, opp:{ ...ch.opp, ...CB_AWAY }, base: ch.base || ch } : ch; }
+const hpCol = f => A11Y.cb ? (f > 0.55 ? '#4fa8ff' : f > 0.25 ? '#ffb51e' : '#ff4fd8') : (f > 0.55 ? '#74d38f' : f > 0.25 ? '#ffb51e' : '#ec3b4f');
 const TUNE_DEF = [
   ['Skating', [
     ['carveSlow', 'Turn rate when slow', 2, 9, 0.1, 5.4, 'rad/s'],
@@ -380,7 +392,7 @@ const ATTRS = [['speed','Speed'],['accel','Acceleration'],['shot','Shot power'],
 const defAttrs = () => Object.fromEntries(ATTRS.map(([k]) => [k, 1]));
 const RULES = [['icing','Icing','Clearing the puck from your half past the far goal line brings a faceoff back'],['faceoffs','Faceoffs after goals','Off keeps play going: the goalie or a fresh puck restarts it'],['checking','Body checking','Off still allows poke checks'],['kos','Knockouts','Off means hits and hazards never drain health'],['hazards','Arena hazards','Holes, vents, mines, sludge, wells and saws'],['powerups','Power-up crates','Crates drop on the ice. In practice they hold every power-up you have unlocked']];
 const DEFAULT_RULES = { icing:false, faceoffs:true, checking:true, kos:true, hazards:true, powerups:true };
-const practiceDef = () => ({ arena:'boneyard', opp:2, mates:0, goalies:'both', effort:'light', clock:0,
+const practiceDef = () => ({ arena:'boneyard', players:'1p', opp:2, mates:0, goalies:'both', effort:'light', clock:0,
   rules:{ icing:true, faceoffs:false, checking:true, kos:true, hazards:true, powerups:true }, attrs:{ home:defAttrs(), away:defAttrs() } });
 let practice = practiceDef();
 try { const pr = JSON.parse(localStorage.getItem('rinkrat-practice') || 'null'); if (pr && typeof pr === 'object') { const d = practiceDef(); practice = { ...d, ...pr, rules:{ ...d.rules, ...(pr.rules||{}) }, attrs:{ home:{ ...d.attrs.home, ...((pr.attrs||{}).home||{}) }, away:{ ...d.attrs.away, ...((pr.attrs||{}).away||{}) } } }; } } catch(e) {}
@@ -390,17 +402,19 @@ try { const gc = JSON.parse(localStorage.getItem('rinkrat-game') || 'null'); if 
 const saveGame = () => { try { localStorage.setItem('rinkrat-game', JSON.stringify(gameCfg)); } catch(e) {} };
 const gameCustom = () => { const n = RULES.filter(([k]) => gameCfg.rules[k] !== DEFAULT_RULES[k]).length + ['home','away'].reduce((a, tm) => a + ATTRS.filter(([k]) => Math.abs(gameCfg.attrs[tm][k] - 1) > 0.001).length, 0); return n; };
 const savePractice = () => { try { localStorage.setItem('rinkrat-practice', JSON.stringify(practice)); } catch(e) {} };
+const drillTeam = tm => tm === 'away' && !!G && !!G.practice && G.effort !== 'full' && G.mode !== 'vs';
 const attrOf = (tm, k) => (G && G.attr && G.attr[tm] && G.attr[tm][k]) || 1;
 const rule = k => !G || !G.rules ? DEFAULT_RULES[k] : !!G.rules[k];
 function applyAttrsLive(){ for (const s of G.sk) { s.max = s.baseMax*attrOf(s.team, 'speed'); s.acc = s.baseAcc*attrOf(s.team, 'accel'); } }
 
-function newMatch(ch, attract){
+function newMatch(ch, attract, mode){
+  ch = paletteFor(ch);
   const tier = ch.tier, pr = ch.practice || null;
   G = { ch, attract, theme:THEMES[ch.id], tier, state:'faceoff', stT:1.3, clock:ch.len, time:0,
     score:{ home:0, away:0 }, sog:{ home:0, away:0 }, kos:{ home:0, away:0 }, hits:{ home:0, away:0 },
     powersUsed:0, powerGoals:0, power:{ home:null, away:null }, armed:{ home:null, away:null }, powerT:{ home:-99, away:-99 },
     aiPowT:{ home:3, away:3 }, crates:[], crateT:4, traps:[], walls:[], parts:[], pops:[], rings:[], bolts:[], beams:[], shake:0,
-    ctrl: attract ? -1 : 0, switchCd:0, objShown:false, goalLight:null, low:!!ch.hz.low, endT:0,
+    ctrl: attract ? -1 : 0, ctrl2:-1, switchCd:0, switchCd2:0, mode: attract ? '1p' : (mode || '1p'), objShown:false, goalLight:null, low:!!ch.hz.low, endT:0,
     practice:pr, effort: pr ? pr.effort : 'full', rules: pr ? { ...pr.rules } : attract ? { ...DEFAULT_RULES } : { ...gameCfg.rules }, attr: pr ? JSON.parse(JSON.stringify(pr.attrs)) : attract ? { home:defAttrs(), away:defAttrs() } : JSON.parse(JSON.stringify(gameCfg.attrs)), regT:0, foSpot:null };
   if (ch.start) { G.score.home = ch.start[0]; G.score.away = ch.start[1]; }
   G.hz = buildHazards(G.rules.hazards ? ch.hz : {});
@@ -423,6 +437,15 @@ const dirOf = tm => tm==='home' ? -1 : 1;           // attack direction in y
 const goalY = tm => tm==='home' ? GT : GB;          // net this team shoots at
 const ownY = tm => tm==='home' ? GB : GT;
 
+// put each human on the nearest skater of their team for a faceoff
+function assignHumans(spot){
+  if (!G || G.attract) return;
+  const near = (tm, not) => G.sk.filter(s => s.team === tm && s.ko <= 0 && s !== not).sort((a,b) => hyp(a.x-spot.x, a.y-spot.y) - hyp(b.x-spot.x, b.y-spot.y))[0];
+  const p1 = near('home'); if (p1) G.ctrl = G.sk.indexOf(p1);
+  if (G.mode === 'coop') { const p2 = near('home', p1); G.ctrl2 = p2 ? G.sk.indexOf(p2) : -1; }
+  else if (G.mode === 'vs') { const p2 = near('away'); G.ctrl2 = p2 ? G.sk.indexOf(p2) : -1; }
+  if (G.mode === 'vs') G.awayWait = 0;
+}
 function foTargets(spot){
   const { x, y } = spot, cl = (px, py) => [clamp(px, 6, 79), clamp(py, 8, 192)];
   const inward = Math.abs(x - CX) < 2 ? 1 : (x < CX ? 1 : -1), center = Math.abs(x - CX) < 2;
@@ -451,11 +474,11 @@ function finishRegroup(){
   }
   Object.assign(P, { ref:false, x:spot.x, y:spot.y, vx:0, vy:0 });
   G.state = 'faceoff'; G.stT = 0.8; G.awayWait = 0.45 - G.tier*0.03;
-  if (!G.attract) { const h = G.sk.filter(s => s.team === 'home' && s.ko <= 0); if (h.length) { h.sort((a,b) => hyp(a.x-spot.x, a.y-spot.y) - hyp(b.x-spot.x, b.y-spot.y)); G.ctrl = G.sk.indexOf(h[0]); } }
+  assignHumans(spot);
 }
-function regroupInput(s, cs){
+function regroupInput(s){
   if (s.ko > 0 || !s.foT) return [0,0];
-  if (s === cs) { const v = readInput(); if (hyp(v[0], v[1]) > 0.25) return v; }
+  { const hp = humanOf(s); if (hp >= 0) { const v = readInput(hp); if (hyp(v[0], v[1]) > 0.25) return v; } }
   const [tx, ty] = s.foT, d = hyp(tx - s.x, ty - s.y);
   if (d < 1.6) { s.face = turn(s.face, s.team === 'home' ? -Math.PI/2 : Math.PI/2, 0.12); return [0,0]; }
   const v = moveTo(s, tx, ty), k = d > 30 ? 0.85 : d > 10 ? 0.66 : 0.5;
@@ -471,7 +494,7 @@ function setFaceoff(){
   G.pucks = [mkPuck()];
   for (const g of [G.gH, G.gA]) { g.x = CX; g.y = g.team==='away' ? GT+2.8 : GB-2.8; g.hold = 0; g.cool = 0; g.sx = CX; g.sy = 100; g.stun = 0; g.frozen = 0; }
   G.state = 'faceoff'; G.stT = 1.1;
-  if (!G.attract) { const h = G.sk.filter(s => s.team==='home'); G.ctrl = G.sk.indexOf(h[0]); }
+  assignHumans({ x:CX, y:100 });
   G.awayWait = 0.45 - G.tier*0.03;
 }
 
@@ -524,7 +547,7 @@ function burst(x, y, n, colors, sp=20, size=0.6, life=0.7){
   for (let i=0;i<n && G.parts.length<420;i++){ const a=rand(0,Math.PI*2), v=rand(sp*0.3,sp); G.parts.push({ x, y, vx:Math.cos(a)*v, vy:Math.sin(a)*v, life:rand(life*0.5,life), max:life, c:pick(colors), s:rand(size*0.5,size*1.4) }); }
 }
 function ring(x, y, R, color, life=0.5){ G.rings.push({ x, y, R, c:color, life, max:life }); }
-function shake(v){ G.shake = Math.max(G.shake, v); }
+function shake(v){ if (A11Y.rm) return; G.shake = Math.max(G.shake, v); }
 
 // ---------------- damage
 function dropPuck(s, sp=12){
@@ -555,12 +578,12 @@ function knockOut(s, kind){
   pop(s.x, s.y - 4, msg, s.team==='home' ? '#ec3b4f' : '#ffb51e', 22, 1.4);
   if (s.team==='away') pop(s.x, s.y + 2, 'BODY COUNT +1', '#f1e7d0', 12, 1.4);
   sfx(kind==='drown' ? 'splash' : 'ko'); shake(1.2);
-  if (s === ctrlSk()) { rumble(1, 1, 380); autoSwitch(true); }
+  { const hp = humanOf(s); if (hp >= 0) { rumble(1, 1, 380, hp); autoSwitch(true, hp); } }
 }
 function hit(att, vic, power, nx, ny){
   vic.hitImm = 0.45;
   if (vic.kaiju > 0 || vic.inv > 0) return;
-  if (vic === ctrlSk()) rumble(Math.min(1, power/55), 0.6, 200); else if (att === ctrlSk()) rumble(Math.min(0.6, power/90), 0.7, 140);
+  rumbleSk(vic, Math.min(1, power/55), 0.6, 200); rumbleSk(att, Math.min(0.6, power/90), 0.7, 140);
   G.hits[att.team]++;
   vic.vx += nx * (10 + power*TUNE.knockback); vic.vy += ny * (10 + power*TUNE.knockback);
   const big = power >= TUNE.knockPower;
@@ -617,6 +640,7 @@ function bladeTarget(s){
       if (Math.abs(rel) < 1.9) { a = rel*0.85; r = s.r + Math.min(2.5, 1.3 + d*0.22); }
     }
   }
+  if (s.deke && own) [a, r] = dekeBlade(s);
   if (s.swing > 0) { a = clamp(angDiff(s.swingA, s.face), -1.2, 1.2)*0.8; r = s.r + 2.5; }   // pass / shot follow-through
   if (s.relT > 0) { a = 0.05; r = s.r + 1.9; }
   if (s.lunge > 0) { a *= 0.4; r += 1.9; }
@@ -627,11 +651,52 @@ function updBlade(s, h){
   const b = s.bl || (s.bl = { a:0.12, r:s.r + 1.7, va:0, vr:0, x:s.x, y:s.y, sp:0 });
   if (s.ko > 0) { b.x = s.x; b.y = s.y; b.sp = 0; return; }
   const [ta, tr] = bladeTarget(s), own = G.pucks[0].owner === s;
-  const k = s.relT > 0 ? 900 : s.skIn ? TUNE.bladeSkill : TUNE.bladeAuto, c = 2*Math.sqrt(k), lim = s.relT > 0 ? 34 : own ? TUNE.bladeLimit : Math.max(20, TUNE.bladeLimit);
+  const k = s.relT > 0 ? 900 : s.deke ? 650 : s.skIn ? TUNE.bladeSkill : TUNE.bladeAuto, c = 2*Math.sqrt(k), lim = s.relT > 0 || s.deke ? 34 : own ? TUNE.bladeLimit : Math.max(20, TUNE.bladeLimit);
   b.va = clamp(b.va + (k*(ta - b.a) - c*b.va)*h, -lim, lim); b.a = clamp(b.a + b.va*h, -BLADE_MAX, BLADE_MAX);
-  b.vr += (k*(tr - b.r) - c*b.vr)*h; b.r = clamp(b.r + b.vr*h, s.r + 0.5, s.r + 5);
+  b.vr += (k*(tr - b.r) - c*b.vr)*h; b.r = clamp(b.r + b.vr*h, s.deke ? s.r*0.25 : s.r + 0.5, s.r + 5);
   const wa = s.face + b.a, nx = s.x + Math.cos(wa)*b.r, ny = s.y + Math.sin(wa)*b.r;
   b.sp = hyp(nx - b.x - s.vx*h, ny - b.y - s.vy*h)/h; b.x = nx; b.y = ny;
+}
+// ---------------- one-timers and dekes
+// One-timer: shoot while a pass is on its way and you fire it straight off the pass, harder and quicker than a normal shot.
+function armOneTimer(s){
+  if (s.ot > 0) return;
+  s.ot = 0.9; s.charging = true; s.charge = 0.35;
+}
+function fireOneTimer(s){
+  const P = G.pucks[0], gy = goalY(s.team);
+  P.owner = s; s.ot = 0; s.charging = false;
+  const v = s.skIn, base = v && hyp(v[0], v[1]) > 0.4 ? Math.atan2(v[1], v[0]) : Math.atan2(gy - P.y, CX - P.x);
+  const err = isHuman(s) ? 0 : rand(-1, 1)*shotErr(s.team)*0.8;
+  shoot(s, clamp(0.85 + (s.charge || 0)*0.27, 0, 1.12), assistAim(s, base) + err);
+  pop(s.x, s.y - 5, 'ONE-TIMER!', s.team === 'home' ? '#ffb51e' : '#c9a4ff', 14, 1.0);
+  if (isHuman(s)) rumbleSk(s, 0.3, 0.8, 120);
+}
+// Dekes: a toe drag pulls the puck wide then snaps it back across; between the legs tucks it behind and through.
+// Defenders in front get fooled for a moment (no pokes, no checks on the carrier, a step slower).
+function startDeke(s, stick){
+  const P = G.pucks[0];
+  if (P.owner !== s || s.charging || (s.dekeCd || 0) > 0 || s.stun > 0) return false;
+  const m = stick ? hyp(stick[0], stick[1]) : 0;
+  const kind = m > 0.4 ? 'drag' : 'btl', side = m > 0.4 ? (angDiff(Math.atan2(stick[1], stick[0]), s.face) >= 0 ? 1 : -1) : 1;
+  s.deke = { t:0, dur: kind === 'btl' ? 0.55 : 0.42, kind, side }; s.dekeCd = 1.0;
+  if (kind === 'drag') { const a = s.face + side*Math.PI/2; s.vx += Math.cos(a)*5; s.vy += Math.sin(a)*5; }
+  let fooled = 0;
+  for (const d of G.sk) {
+    if (d.team === s.team || d.ko > 0) continue;
+    const dx = d.x - s.x, dy = d.y - s.y, dd = hyp(dx, dy);
+    if (dd < 10 && Math.abs(angDiff(Math.atan2(dy, dx), s.face)) < 1.2) { d.faked = 0.55; d.charging = false; fooled++; }
+  }
+  if (fooled) pop(s.x, s.y - 5, kind === 'btl' ? 'BETWEEN THE LEGS!' : 'DANGLE!', s.team === 'home' ? '#ffb51e' : '#c9a4ff', 13, 0.9);
+  sfx('stick', 0.8);
+  return true;
+}
+function dekeBlade(s){
+  const d = s.deke, f = d.t/d.dur;
+  if (d.kind === 'drag') return f < 0.45 ? [d.side*1.35, s.r + 2.4] : [-d.side*0.45, s.r + 1.15];
+  if (f < 0.35) return [2.25, s.r + 0.9];        // tuck it back by the hip
+  if (f < 0.62) return [0, s.r*0.3];             // through the legs
+  return [-0.15, s.r + 1.7];                     // out in front again
 }
 // assisted aim around a chosen direction: nudges toward the open side of the net when roughly on target
 function assistAim(s, base){
@@ -674,6 +739,7 @@ function updSkater(s, ix, iy, h){
   if (G.pucks[0].owner === s) max *= 0.94;
   if (s.rocket > 0) { max *= 1.6; acc *= 2.3; }
   if (s.slowed) max *= 0.55;
+  if (s.faked > 0) max *= 0.7;
   if (G.low) acc *= 0.62;
   if (s.rocket > 0 && !ix && !iy && s.stun <= 0 && s.frozen <= 0) { ix = Math.cos(s.face); iy = Math.sin(s.face); }
   if (!(ix || iy) || hyp(s.vx, s.vy) <= 7) s.braking = false;
@@ -758,9 +824,9 @@ function contact(a, b){
   if (rv < 0) { const j = -rv*0.9; a.vx -= nx*j*mb/tot; a.vy -= ny*j*mb/tot; b.vx += nx*j*ma/tot; b.vy += ny*j*ma/tot; }
   if (a.team === b.team || (G.state !== 'play' && G.state !== 'goal')) return;
   const att = sa >= sb ? a : b, vic = att === a ? b : a, sgn = att === a ? 1 : -1;
-  if (vic.hitImm > 0) return;
+  if (vic.hitImm > 0 || att.faked > 0) return;
   const closing = -rv;
-  if (G.state === 'regroup' || !rule('checking') || (G.practice && G.effort !== 'full' && att.team === 'away')) return;
+  if (G.state === 'regroup' || !rule('checking') || drillTeam(att.team)) return;
   let power = 0;
   if (att.kaiju > 0) power = 70;
   else if (att.rocket > 0 && closing > 6) power = 50;
@@ -779,7 +845,7 @@ function lunge(s, ang){
   s.pokeCd = 0.65; s.lunge = 0.3; s.face = ang;
   s.vx += Math.cos(ang)*15; s.vy += Math.sin(ang)*15;
   const P = G.pucks[0], o = P.owner;
-  if (o && o.team !== s.team) {
+  if (o && o.team !== s.team && !o.deke && !(s.faked > 0)) {
     const [sx, sy] = stickPt(s);
     if (hyp(P.x-sx, P.y-sy) < 3.8 && Math.random() < (s.magnet>0 ? 0.95 : 0.62/attrOf(o.team, 'handle'))) knockLoose(o, s);
   }
@@ -815,7 +881,7 @@ function shoot(s, power, ang){
   }
   s.cool = 0.3; s.charging = false; s.charge = 0; s.swing = 0.28; s.swingA = ang;
   sfx('shot', power);
-  if (s === ctrlSk()) rumble(0.1, 0.3 + power*0.5, 80);
+  rumbleSk(s, 0.1, 0.3 + power*0.5, 80);
 }
 function passTargets(s){ return G.sk.filter(m => m.team === s.team && m !== s && m.ko <= 0); }
 function passPuck(s, pref){
@@ -834,7 +900,7 @@ function passPuck(s, pref){
   P.owner = null; P.vx = Math.cos(a)*sp; P.vy = Math.sin(a)*sp; P.passTo = best; P.passT = 1.4; P.shotBy = null; P.last = s.team; P.team = s.team;
   P.icing = (s.team === 'home' ? P.y > 100 : P.y < 100) ? s.team : null;
   s.cool = 0.28; s.charging = false; s.swing = 0.24; s.swingA = a;
-  if (s === ctrlSk()) { G.ctrl = G.sk.indexOf(best); G.switchCd = 0.6; }
+  { const hp = humanOf(s); if (hp >= 0 && !isHuman(best)) { setHuman(hp, best); if (hp === 0) G.switchCd = 0.6; else G.switchCd2 = 0.6; } }
   sfx('stick', 0.9);
   return { target:best, score:bs };
 }
@@ -904,7 +970,7 @@ function goaliePuck(g, P){
 }
 function outlet(g){
   const P = G.pucks[0], top = g.team === 'away';
-  if (G.practice && g.team === 'away') {
+  if (G.practice && g.team === 'away' && G.mode !== 'vs') {
     const corner = Math.random() < 0.5, tx = corner ? (Math.random() < 0.5 ? 10 : 75) : CX + rand(-6, 6), ty = corner ? 16 : 100 + rand(-4, 6);
     const a = Math.atan2(ty - P.y, tx - P.x), dist = hyp(tx - P.x, ty - P.y), sp = clamp(20 + dist*0.5, 26, 50);
     P.hold = null; P.x = g.x + Math.cos(a)*(g.r+PUCK_R+0.3); P.y = g.y + Math.sin(a)*(g.r+PUCK_R+0.3);
@@ -912,7 +978,8 @@ function outlet(g){
     g.cool = 0.6; sfx('stick', 0.8); return;
   }
   const mates = G.sk.filter(s => s.team === g.team && s.ko <= 0);
-  let mate = (g.team === 'home' && ctrlSk() && ctrlSk().ko <= 0) ? ctrlSk() : mates.sort((a,b) => (top ? b.y-a.y : a.y-b.y))[0];
+  const hpG = teamHasHuman(g.team) ? (g.team === 'away' ? 1 : 0) : -1, hs = hpG >= 0 ? humanSk(hpG) : null;
+  let mate = (hs && hs.ko <= 0) ? hs : mates.sort((a,b) => (top ? b.y-a.y : a.y-b.y))[0];
   let tx, ty;
   if (mate) { tx = mate.x + mate.vx*0.35; ty = mate.y + mate.vy*0.35; }
   if (!mate || (top ? ty < GT+5 : ty > GB-5) || hyp(tx-P.x, ty-P.y) < 7) { tx = P.x < CX ? 8 : 77; ty = top ? 42 : 158; }
@@ -920,7 +987,7 @@ function outlet(g){
   P.hold = null;
   P.x = g.x + Math.cos(a)*(g.r+PUCK_R+0.3); P.y = g.y + Math.sin(a)*(g.r+PUCK_R+0.3);
   P.vx = Math.cos(a)*sp; P.vy = Math.sin(a)*sp; P.shotBy = null; P.last = g.team; P.team = g.team; P.passTo = mate || null; P.passT = 1.3;
-  if (g.team === 'home' && mate && !G.attract) G.ctrl = G.sk.indexOf(mate);
+  if (hpG >= 0 && mate && !isHuman(mate)) setHuman(hpG, mate);
   g.cool = 0.4; sfx('stick', 0.8);
 }
 
@@ -963,9 +1030,9 @@ function stepPuck(P, h){
   const py = P.y;
   if (P.owner) {
     const s = P.owner, [bx, by] = stickPt(s), tx = bx + Math.cos(s.face)*0.55, ty = by + Math.sin(s.face)*0.55;
-    const k = Math.min(1, h*(s.recv > 0 ? 10 : TUNE.grip)), nx = P.x + (tx-P.x)*k, ny = P.y + (ty-P.y)*k;
+    const k = Math.min(1, h*(s.deke ? 55 : s.recv > 0 ? 10 : TUNE.grip)), nx = P.x + (tx-P.x)*k, ny = P.y + (ty-P.y)*k;
     P.vx = (nx - P.x)/h; P.vy = (ny - P.y)/h; P.x = nx; P.y = ny;
-    if (s.recv <= 0 && hyp(tx - P.x, ty - P.y) > TUNE.loseDist) { P.owner = null; s.cool = 0.3; s.charging = false; P.vx = s.vx*0.6; P.vy = s.vy*0.6; }
+    if (s.recv <= 0 && !s.deke && hyp(tx - P.x, ty - P.y) > TUNE.loseDist) { P.owner = null; s.cool = 0.3; s.charging = false; P.vx = s.vx*0.6; P.vy = s.vy*0.6; }
   } else {
     P.x += P.vx*h; P.y += P.vy*h;
     let fr = G.low ? 0.1 : 0.32;
@@ -1007,10 +1074,12 @@ function stepPuck(P, h){
 function take(s){
   const P = G.pucks[0];
   P.icing = null;
+  if (s.ot > 0 && G.state === 'play') { fireOneTimer(s); return; }
   P.owner = s; P.shotBy = null; P.last = s.team; P.team = s.team; P.passTo = null; P.fire = 0; P.homing = 0; P.powered = false;
   s.recv = 0.2; s.wind = 0; s.relT = 0;
   if (s.bl) { const rel = clamp(angDiff(Math.atan2(P.y - s.y, P.x - s.x), s.face), -BLADE_MAX, BLADE_MAX); s.bl.va += (rel - s.bl.a)*4; }
-  if (s.team === 'home' && !G.attract) { G.ctrl = G.sk.indexOf(s); }
+  if (!G.attract && !isHuman(s) && teamHasHuman(s.team) && !(G.mode === 'coop' && s.team === 'home')) setHuman(s.team === 'away' ? 1 : 0, s);
+  else if (!G.attract && !isHuman(s) && s.team === 'home' && humans() === 1) setHuman(0, s);
   s.ai.think = rand(0.3, 0.7); s.ai.lane = pick([20, CX, 65]);
   sfx('stick', 0.6);
 }
@@ -1031,7 +1100,8 @@ function steals(dt){
   const P = G.pucks[0], o = P.owner; if (!o) return;
   for (const s of G.sk) {
     if (s.team === o.team || s.ko > 0 || s.stun > 0 || s.frozen > 0 || s.cool > 0) continue;
-    if (s === ctrlSk()) {
+    if (o.deke || s.faked > 0) continue;
+    if (isHuman(s)) {
       if (s.bl && s.bl.sp > 16 && s.pokeCd <= 0 && hyp(s.bl.x - P.x, s.bl.y - P.y) < 2.7) {
         s.pokeCd = 0.4;
         if (Math.random() < (s.magnet > 0 ? 0.95 : 0.7/attrOf(o.team, 'handle'))) { knockLoose(o, s); const a = s.face + s.bl.a + Math.sign(s.bl.va || 1)*1.2; P.vx = Math.cos(a)*16 + s.vx*0.4; P.vy = Math.sin(a)*16 + s.vy*0.4; return; }
@@ -1042,7 +1112,7 @@ function steals(dt){
     const [sx, sy] = stickPt(s);
     if (hyp(sx-P.x, sy-P.y) < 2.8) {
       let rate = (s.team === 'away' ? 0.55 + G.tier*0.22 : 0.9) / attrOf(o.team, 'handle');
-      if (G.practice && G.effort !== 'full' && s.team === 'away') rate = G.effort === 'light' ? 0.35 : 0;
+      if (drillTeam(s.team)) rate = G.effort === 'light' ? 0.35 : 0;
       if (s.magnet > 0) rate *= 3;
       if (Math.random() < rate*dt) { knockLoose(o, s); return; }
     }
@@ -1057,6 +1127,7 @@ function toast(main, sub, ms, cls){
   t.className = 'toast' + (cls ? ' ' + cls : ''); t.hidden = true; void t.offsetWidth; t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
+const rumbleTeam = (tm, a, b, ms) => { for (let p = 0; p < humans(); p++) if (humanTeam(p) === tm) rumble(a, b, ms, p); };
 function scoreGoal(tm, P){
   if (P.owner) { const o = P.owner; P.owner = null; o.charging = false; }
   G.score[tm]++;
@@ -1070,14 +1141,14 @@ function scoreGoal(tm, P){
     if (!g.off) { P.hold = g; g.hold = 1.1; P.vx = P.vy = 0; P.shotBy = null; P.passTo = null; }
     else Object.assign(P, { x:CX + rand(-3, 3), y: tm === 'home' ? GT + 14 : GB - 14, vx:rand(-5, 5), vy: tm === 'home' ? 16 : -16, shotBy:null, passTo:null });
     burst(CX, tm === 'home' ? GT : GB, 30, ['#ffb51e','#ec3b4f','#ffffff'], 26, 0.7, 1);
-    if (tm === 'home') { rumble(0.6, 0.9, 380); toast('GOAL', 'Play on', 1500, 'goal'); sfx('horn'); sfx('cheer'); }
+    if (tm === 'home') { rumbleTeam('home', 0.6, 0.9, 380); toast('GOAL', 'Play on', 1500, 'goal'); sfx('horn'); sfx('cheer'); }
     else { toast(G.ch.opp.abbr + ' score', 'Play on', 1300, 'small bad'); sfx('whistle'); sfx('aww'); }
     return;
   }
   G.state = 'goal'; G.stT = 3; G.goalLight = { team:tm, t:0 };
   const gy = tm === 'home' ? GT : GB;
   burst(CX, gy, 40, ['#ffb51e','#ec3b4f','#ffffff'], 30, 0.8, 1.2); shake(1.6);
-  if (tm === 'home') { rumble(0.7, 1, 450); toast('GOAL', powered ? 'Power-up goal' : `${G.score.home}–${G.score.away}`, 2700, 'goal'); sfx('horn'); sfx('cheer'); }
+  if (tm === 'home') { rumbleTeam('home', 0.7, 1, 450); toast('GOAL', powered ? 'Power-up goal' : `${G.score.home}–${G.score.away}`, 2700, 'goal'); sfx('horn'); sfx('cheer'); }
   else { toast(G.ch.opp.abbr + ' score', `${G.score.home}–${G.score.away}`, 2400, 'small bad'); sfx('whistle'); sfx('aww'); }
   if (!G.attract) checkObjLive();
 }
@@ -1118,7 +1189,7 @@ function condText(c, ch){
     case 'comeback': return 'Start down 0–2. Win anyway';
     case 'takenMax': return `Lose ${c.n} or fewer skaters to KOs`;
     case 'powerGoals': return c.n === 1 ? 'Score a power-up goal' : `Score ${c.n} power-up goals`;
-    case 'practice': { const pr = ch && ch.practice; return pr ? `Practice · ${pr.opp} opponent${pr.opp === 1 ? '' : 's'} · ${pr.effort === 'full' ? 'full effort' : pr.effort}` : 'Practice'; }
+    case 'practice': { const pr = ch && ch.practice; return pr ? (pr.players === 'vs' ? `Versus · P1 Rats vs P2 ${ch.opp.abbr}` : `Practice${pr.players === 'coop' ? ' co-op' : ''} · ${pr.opp} opponent${pr.opp === 1 ? '' : 's'} · ${pr.effort === 'full' ? 'full effort' : pr.effort}`) : 'Practice'; }
   }
   return '';
 }
@@ -1240,7 +1311,7 @@ function drillAI(s, dt){
 }
 function aiSkater(s, dt){
   if (s.ko > 0 || s.stun > 0 || s.frozen > 0) { s.charging = false; return [0,0]; }
-  if (s.team === 'away' && G.practice && G.effort !== 'full') return G.awayWait > 0 ? [0,0] : drillAI(s, dt);
+  if (drillTeam(s.team)) return G.awayWait > 0 ? [0,0] : drillAI(s, dt);
   if (s.team === 'away' && G.awayWait > 0) return [0,0];
   const P = G.pucks[0], tm = s.team, dir = dirOf(tm), gy = goalY(tm), oy = ownY(tm);
   const mates = G.sk.filter(m => m.team === tm && m.ko <= 0);
@@ -1284,7 +1355,7 @@ function aiSkater(s, dt){
   }
   s.charging = false;
   if (carrier && carrier.team === tm) {
-    const others = mates.filter(m => m !== carrier && m !== ctrlSk()).sort((a,b) => a.role - b.role);
+    const others = mates.filter(m => m !== carrier && !isHuman(m)).sort((a,b) => a.role - b.role);
     const k = others.indexOf(s);
     const side = carrier.x < CX ? 64 : 21;
     const aheadY = tm === 'home' ? Math.max(gy+18, carrier.y-28) : Math.min(gy-18, carrier.y+28);
@@ -1294,7 +1365,7 @@ function aiSkater(s, dt){
   }
   if (carrier) {
     let chaser = null, cd = 1e9;
-    for (const m of mates) { const d = hyp(m.x-carrier.x, m.y-carrier.y) + (m === ctrlSk() ? -3 : 0); if (d < cd) { cd = d; chaser = m; } }
+    for (const m of mates) { const d = hyp(m.x-carrier.x, m.y-carrier.y) + (isHuman(m) ? -3 : 0); if (d < cd) { cd = d; chaser = m; } }
     if (chaser === s) {
       const vx = CX - carrier.x, vy = oy - carrier.y, vd = hyp(vx, vy) || 1;
       const tx = carrier.x + vx/vd*3.5 + carrier.vx*0.18, ty = carrier.y + vy/vd*3.5 + carrier.vy*0.18;
@@ -1303,7 +1374,7 @@ function aiSkater(s, dt){
       if (d < 6.5 && s.pokeCd <= 0 && Math.random() < rate*dt*2) lunge(s, Math.atan2(carrier.y - s.y, carrier.x - s.x));
       return moveTo(s, tx, ty);
     }
-    const others = mates.filter(m => m !== chaser && m !== ctrlSk()).sort((a,b) => a.role - b.role);
+    const others = mates.filter(m => m !== chaser && !isHuman(m)).sort((a,b) => a.role - b.role);
     const k = others.indexOf(s);
     if (k === 0) {
       let mark = null, md = 1e9;
@@ -1314,13 +1385,13 @@ function aiSkater(s, dt){
   }
   // loose puck
   let chaser = null, cd = 1e9;
-  for (const m of mates) { const d = hyp(m.x-P.x, m.y-P.y) + (m === ctrlSk() ? -4 : 0); if (d < cd) { cd = d; chaser = m; } }
+  for (const m of mates) { const d = hyp(m.x-P.x, m.y-P.y) + (isHuman(m) ? -4 : 0); if (d < cd) { cd = d; chaser = m; } }
   if (P.passTo && P.passTo.team === tm) chaser = P.passTo;
   if (chaser === s) {
     const d = hyp(P.x-s.x, P.y-s.y), lead = Math.min(0.5, d/s.max);
     return moveTo(s, P.x + P.vx*lead, P.y + P.vy*lead);
   }
-  const others = mates.filter(m => m !== chaser && m !== ctrlSk()).sort((a,b) => a.role - b.role);
+  const others = mates.filter(m => m !== chaser && !isHuman(m)).sort((a,b) => a.role - b.role);
   const k = others.indexOf(s);
   if (k === 0) return moveTo(s, clamp(P.x < CX ? P.x + 20 : P.x - 20, 8, 77), clamp(P.y + dir*12, 14, 186));
   return moveTo(s, CX, clamp(P.y - dir*24, 20, 180));
@@ -1328,7 +1399,7 @@ function aiSkater(s, dt){
 const aiControlsPower = tm => tm === 'away' || G.attract;
 function powerUser(tm){
   const P = G.pucks[0];
-  if (tm === 'home' && !G.attract) return ctrlSk();
+  if (teamHasHuman(tm)) { const hs = humanSk(tm === 'away' ? 1 : 0); if (hs) return hs; }
   if (P.owner && P.owner.team === tm) return P.owner;
   let best = null, bd = 1e9;
   for (const s of G.sk) { if (s.team !== tm || s.ko > 0) continue; const d = hyp(s.x-P.x, s.y-P.y); if (d < bd) { bd = d; best = s; } }
@@ -1397,7 +1468,7 @@ function crateLogic(dt){
     if (c.life <= 0) { G.crates.splice(i,1); continue; }
     for (const s of G.sk) {
       if (s.ko > 0 || G.power[s.team] || hyp(s.x-c.x, s.y-c.y) > s.r + 2.2) continue;
-      if (s.team === 'away' && G.practice && G.effort !== 'full') continue;
+      if (drillTeam(s.team)) continue;
       const pool = s.team === 'home' ? (G.attract ? ['rocket','slick','fireball','mine','kaiju'] : G.practice ? PORDER.filter(k => POWERS[k].lvl <= lvlInfo(save.xp).L) : save.loadout) : G.ch.cpu;
       const p = pick(pool.length ? pool : ['rocket']);
       G.power[s.team] = p; G.aiPowT[s.team] = rand(1.2, 3.5);
@@ -1409,65 +1480,105 @@ function crateLogic(dt){
 }
 
 // ---------------- input
+// ---------------- input: remappable bindings, any number of controllers, one or two players
 const keys = new Set();
-const JR = 46;
+let JR = 46;
 const joy = { id:null, bx:0, by:0, x:0, y:0 };
+const ACTIONS = [['up','Skate up'],['down','Skate down'],['left','Skate left'],['right','Skate right'],['stUp','Stick forward'],['stDown','Stick back'],['stLeft','Stick left'],['stRight','Stick right'],['shoot','Shoot (hold) · check'],['pass','Pass · switch player'],['power','Power-up'],['deke','Deke']];
+const PAD_ACTIONS = ['shoot', 'pass', 'power', 'deke'];
+const BIND_PROFILES = [['kb','Keyboard'],['kb1','Shared keyboard · P1'],['kb2','Shared keyboard · P2'],['pad','Controller']];
+const DEF_BINDS = {
+  kb:  { up:['KeyW','ArrowUp'], down:['KeyS','ArrowDown'], left:['KeyA','ArrowLeft'], right:['KeyD','ArrowRight'], stUp:['KeyI'], stDown:['KeyK'], stLeft:['KeyJ'], stRight:['KeyL'], shoot:['Space'], pass:['ShiftLeft','ShiftRight'], power:['KeyE','KeyC'], deke:['KeyQ'] },
+  kb1: { up:['KeyW'], down:['KeyS'], left:['KeyA'], right:['KeyD'], stUp:[], stDown:[], stLeft:[], stRight:[], shoot:['KeyF','Space'], pass:['KeyG'], power:['KeyR'], deke:['KeyQ'] },
+  kb2: { up:['ArrowUp'], down:['ArrowDown'], left:['ArrowLeft'], right:['ArrowRight'], stUp:[], stDown:[], stLeft:[], stRight:[], shoot:['Slash','Numpad0'], pass:['Period','NumpadDecimal'], power:['Comma','NumpadEnter'], deke:['Semicolon'] },
+  pad: { shoot:[0,7], pass:[2,4,6], power:[1,5], deke:[3,11] },
+};
+let binds = JSON.parse(JSON.stringify(DEF_BINDS));
+try { const b = JSON.parse(localStorage.getItem('rinkrat-binds') || 'null'); if (b) for (const p in DEF_BINDS) if (b[p]) for (const a in DEF_BINDS[p]) if (Array.isArray(b[p][a])) binds[p][a] = b[p][a]; } catch(e) {}
+const saveBinds = () => { try { localStorage.setItem('rinkrat-binds', JSON.stringify(binds)); } catch(e) {} };
+const FIXED_KEYS = ['KeyP', 'Escape', 'KeyM', 'Backquote'];
+let capture = null;   // { profile, action } while the remap screen waits for a key or button
+
+// controllers
+const pads = new Map();   // gamepad index -> { g, prev, axes, raxes, name }
+let padBlocked = false;
+function padList(){ return [...pads.values()].sort((a, b) => a.g.index - b.g.index); }
+// which devices drive which player
+function humans(){ return G && !G.attract && (G.mode === 'coop' || G.mode === 'vs') ? 2 : 1; }
+function devicesFor(p){
+  const list = padList(), n = humans();
+  if (n === 1) return { kb:'kb', pads:list, touch:true };
+  if (list.length >= 2) return p === 0 ? { kb:'kb', pads:[list[0]], touch:true } : { kb:null, pads:list.slice(1, 2) };
+  if (list.length === 1) return p === 0 ? { kb:'kb', pads:[], touch:true } : { kb:null, pads:[list[0]] };
+  return p === 0 ? { kb:'kb1', pads:[], touch:true } : { kb:'kb2', pads:[] };
+}
+function deviceLabel(p){
+  const d = devicesFor(p);
+  if (d.pads.length) return d.kb ? `Keyboard + ${padName(d.pads[0])}` : padName(d.pads[0]);
+  return d.kb === 'kb1' ? 'Left side of keyboard' : d.kb === 'kb2' ? 'Right side of keyboard' : 'Keyboard';
+}
+function padName(ps){ return padLabels(ps).name; }
+const held = (prof, a) => !!prof && (binds[prof][a] || []).some(c => keys.has(c));
 function orient(v){
   const R3 = window.__r3d;
   if (R3 && R3.active && R3.basis && (v[0] || v[1])) { const b = R3.basis, m0 = hyp(v[0], v[1]); let x = v[0]*b.rx + (-v[1])*b.fx, y = v[0]*b.ry + (-v[1])*b.fy; const m = hyp(x, y); if (m > 1e-6) { x *= m0/m; y *= m0/m; } return [x, y]; }
   return v;
 }
-function readSkill(){
-  if (pad.raxes[0] || pad.raxes[1]) return orient(pad.raxes);
-  const x = (keys.has('KeyL')?1:0) - (keys.has('KeyJ')?1:0), y = (keys.has('KeyK')?1:0) - (keys.has('KeyI')?1:0), m = hyp(x, y);
-  return m ? orient([x/m, y/m]) : [0, 0];
-}
-function readInput(){
-  const v = readInputRaw(), R3 = window.__r3d;
-  if (R3 && R3.active && R3.basis && (v[0] || v[1])) {
-    const b = R3.basis, m0 = hyp(v[0], v[1]);
-    let x = v[0]*b.rx + (-v[1])*b.fx, y = v[0]*b.ry + (-v[1])*b.fy; const m = hyp(x, y);
-    if (m > 1e-6) { x *= m0/m; y *= m0/m; } return [x, y];
-  }
-  return v;
-}
-function readInputRaw(){
-  if (joy.id !== null) {
+function readInputRaw(p = 0){
+  const d = devicesFor(p);
+  if (d.touch && joy.id !== null) {
     let dx = (joy.x - joy.bx)/JR, dy = (joy.y - joy.by)/JR; const m = hyp(dx, dy);
     if (m < 0.12) return [0,0]; if (m > 1) { dx /= m; dy /= m; } return [dx, dy];
   }
-  if (pad.axes[0] || pad.axes[1]) return pad.axes;
-  const x = (keys.has('ArrowRight')||keys.has('KeyD')?1:0) - (keys.has('ArrowLeft')||keys.has('KeyA')?1:0);
-  const y = (keys.has('ArrowDown')||keys.has('KeyS')?1:0) - (keys.has('ArrowUp')||keys.has('KeyW')?1:0);
+  for (const ps of d.pads) if (ps.axes[0] || ps.axes[1]) return ps.axes;
+  const x = (held(d.kb, 'right')?1:0) - (held(d.kb, 'left')?1:0), y = (held(d.kb, 'down')?1:0) - (held(d.kb, 'up')?1:0);
   const m = hyp(x, y); return m ? [x/m, y/m] : [0,0];
 }
-const playing = () => G && !G.attract && !paused && (G.state === 'play' || G.state === 'faceoff' || G.state === 'goal' || G.state === 'reset' || G.state === 'regroup');
-function pressShoot(){
-  if (!playing() || G.state !== 'play') return;
-  const s = ctrlSk(); if (!s || s.ko > 0) return;
-  if (G.pucks[0].owner === s) { s.charging = true; s.charge = 0; }
-  else { const [ix, iy] = readInput(); lunge(s, (ix||iy) ? Math.atan2(iy, ix) : s.face); }
+function readInput(p = 0){ return orient(readInputRaw(p)); }
+function readSkill(p = 0){
+  const d = devicesFor(p);
+  for (const ps of d.pads) if (ps.raxes[0] || ps.raxes[1]) return orient(ps.raxes);
+  const x = (held(d.kb, 'stRight')?1:0) - (held(d.kb, 'stLeft')?1:0), y = (held(d.kb, 'stDown')?1:0) - (held(d.kb, 'stUp')?1:0), m = hyp(x, y);
+  return m ? orient([x/m, y/m]) : [0, 0];
 }
-function releaseShoot(){
-  const s = ctrlSk(); if (!s) return;
+// players and their skaters (P1 is always G.ctrl; P2 is G.ctrl2)
+const humanSk = p => !G ? null : p === 0 ? ctrlSk() : (G.ctrl2 >= 0 ? G.sk[G.ctrl2] : null);
+const humanTeam = p => p === 0 ? 'home' : (G && G.mode === 'vs' ? 'away' : 'home');
+function humanOf(s){ if (!G || G.attract || !s) return -1; if (s === ctrlSk()) return 0; if (humans() > 1 && s === humanSk(1)) return 1; return -1; }
+const isHuman = s => humanOf(s) >= 0;
+const teamHasHuman = tm => !!G && !G.attract && (tm === 'home' || (G.mode === 'vs' && tm === 'away'));
+function setHuman(p, s){ if (!s) return; const i = G.sk.indexOf(s); if (p === 0) G.ctrl = i; else G.ctrl2 = i; }
+const playing = () => G && !G.attract && !paused && (G.state === 'play' || G.state === 'faceoff' || G.state === 'goal' || G.state === 'reset' || G.state === 'regroup');
+function pressShoot(p = 0){
+  if (!playing() || G.state !== 'play') return;
+  const s = humanSk(p); if (!s || s.ko > 0) return;
+  const P = G.pucks[0];
+  if (P.owner === s) { s.charging = true; s.charge = 0; }
+  else if (P.passTo === s && !P.owner) armOneTimer(s);
+  else { const [ix, iy] = readInput(p); lunge(s, (ix||iy) ? Math.atan2(iy, ix) : s.face); }
+}
+function releaseShoot(p = 0){
+  const s = humanSk(p); if (!s) return;
   if (s.charging) { if (G.pucks[0].owner === s) shoot(s, s.charge, skillAim(s)); s.charging = false; }
 }
-function pressPass(){
+function pressPass(p = 0){
   if (!playing() || G.state !== 'play') return;
-  const s = ctrlSk(); if (!s) return;
-  if (G.pucks[0].owner === s) { const [ix, iy] = readInput(); passPuck(s, (ix||iy) ? Math.atan2(iy, ix) : null); }
-  else autoSwitch(true);
+  const s = humanSk(p); if (!s) return;
+  if (G.pucks[0].owner === s) { const [ix, iy] = readInput(p); passPuck(s, (ix||iy) ? Math.atan2(iy, ix) : null); }
+  else autoSwitch(true, p);
 }
-function autoSwitch(force){
+function pressPower(p = 0){ if (!playing()) return; const s = humanSk(p); if (s) usePower(humanTeam(p), s); }
+function pressDeke(p = 0){ if (!playing() || G.state !== 'play') return; const s = humanSk(p); if (s) startDeke(s, readSkill(p)); }
+function autoSwitch(force, p = 0){
   if (!G || G.attract) return;
-  const P = G.pucks[0], cur = ctrlSk();
-  const homes = G.sk.filter(s => s.team === 'home' && s.ko <= 0 && s !== cur);
-  if (!homes.length) return;
-  homes.sort((a,b) => hyp(a.x-P.x, a.y-P.y) - hyp(b.x-P.x, b.y-P.y));
-  const best = homes[0];
+  const P = G.pucks[0], cur = humanSk(p), tm = humanTeam(p), mate = humans() > 1 ? humanSk(1 - p) : null;
+  const cands = G.sk.filter(s => s.team === tm && s.ko <= 0 && s !== cur && s !== mate);
+  if (!cands.length) return;
+  cands.sort((a,b) => hyp(a.x-P.x, a.y-P.y) - hyp(b.x-P.x, b.y-P.y));
+  const best = cands[0];
   if (force || !cur || cur.ko > 0 || hyp(best.x-P.x, best.y-P.y) < hyp(cur.x-P.x, cur.y-P.y)*0.55) {
     if (cur) cur.charging = false;
-    G.ctrl = G.sk.indexOf(best); G.switchCd = 1.0;
+    setHuman(p, best); if (p === 0) G.switchCd = 1.0; else G.switchCd2 = 1.0;
   }
 }
 cv.addEventListener('pointerdown', e => {
@@ -1492,48 +1603,64 @@ function holdBtn(el, down, up){
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end); el.addEventListener('lostpointercapture', end);
   el.addEventListener('contextmenu', e => e.preventDefault());
 }
-holdBtn($('bShoot'), pressShoot, releaseShoot);
-holdBtn($('bPass'), pressPass);
-holdBtn($('bPower'), () => { if (playing()) usePower('home'); });
+holdBtn($('bShoot'), () => pressShoot(0), () => releaseShoot(0));
+holdBtn($('bPass'), () => pressPass(0));
+holdBtn($('bPower'), () => pressPower(0));
 window.addEventListener('keydown', e => {
+  if (capture && capture.profile !== 'pad') { e.preventDefault(); if (e.code !== 'Escape') bindCaptured(e.code); else endCapture(); return; }
+  if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== 'range') return;
   const inGame = G && !G.attract && G.state !== 'end';
-  if (inGame && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   if (e.code === 'Backquote' && !e.repeat) { toggleTune(); return; }
-  if (e.code === 'KeyM' && !e.repeat && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) { setMuted(!muted); return; }
+  if (e.code === 'KeyM' && !e.repeat) { setMuted(!muted); return; }
   if (e.code === 'KeyP' || e.code === 'Escape') { if (inGame && !paused) setPaused(true); else if (paused) setPaused(false); return; }
   if (!inGame || paused) return;
-  if (e.code === 'Space') { if (!e.repeat) { ensureAudio(); pressShoot(); } return; }
-  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyX') && !e.repeat) { pressPass(); return; }
-  if ((e.code === 'KeyE' || e.code === 'KeyC') && !e.repeat) { usePower('home'); return; }
+  let used = false;
+  for (let p = 0; p < humans(); p++) {
+    const kb = devicesFor(p).kb; if (!kb) continue;
+    const B = binds[kb], has = a => (B[a] || []).includes(e.code);
+    if (ACTIONS.some(([a]) => has(a))) used = true;
+    if (e.repeat) continue;
+    if (has('shoot')) { ensureAudio(); pressShoot(p); }
+    if (has('pass')) pressPass(p);
+    if (has('power')) pressPower(p);
+    if (has('deke')) pressDeke(p);
+  }
+  if (used || ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   keys.add(e.code);
 });
-window.addEventListener('keyup', e => { if (e.code === 'Space') releaseShoot(); keys.delete(e.code); });
-window.addEventListener('blur', () => { keys.clear(); releaseShoot(); });
+window.addEventListener('keyup', e => {
+  keys.delete(e.code);
+  if (!G || G.attract) return;
+  for (let p = 0; p < humans(); p++) { const kb = devicesFor(p).kb; if (kb && (binds[kb].shoot || []).includes(e.code)) releaseShoot(p); }
+});
+window.addEventListener('blur', () => { keys.clear(); releaseShoot(0); if (humans() > 1) releaseShoot(1); });
 
-// ---------------- gamepad (standard mapping: Xbox, PlayStation, Switch Pro)
-const pad = { g:null, prev:[], axes:[0,0], raxes:[0,0], blocked:false, name:'' };
-function findPad(){
-  if (pad.blocked || !navigator.getGamepads) return null;
-  let list; try { list = navigator.getGamepads(); } catch(e) { pad.blocked = true; return null; }
-  for (const g of list || []) if (g && g.connected && g.buttons && g.buttons.length >= 10) return g;
-  return null;
+// ---------------- gamepads (standard mapping: Xbox, PlayStation, Switch Pro)
+function scanPads(){
+  if (padBlocked || !navigator.getGamepads) return [];
+  let list; try { list = navigator.getGamepads(); } catch(e) { padBlocked = true; return []; }
+  return [...(list || [])].filter(g => g && g.connected && g.buttons && g.buttons.length >= 10);
 }
-function rumble(strong, weak, ms){
-  const a = pad.g && pad.g.vibrationActuator;
-  if (!a || !a.playEffect) return;
-  try { const r = a.playEffect('dual-rumble', { duration:ms, strongMagnitude:Math.max(0, Math.min(1, strong)), weakMagnitude:Math.max(0, Math.min(1, weak)) }); if (r && r.catch) r.catch(() => {}); } catch(e) {}
+function rumble(strong, weak, ms, p = 0){
+  for (const ps of devicesFor(p).pads) {
+    const a = ps.g && ps.g.vibrationActuator; if (!a || !a.playEffect) continue;
+    try { const r = a.playEffect('dual-rumble', { duration:ms, strongMagnitude:Math.max(0, Math.min(1, strong)), weakMagnitude:Math.max(0, Math.min(1, weak)) }); if (r && r.catch) r.catch(() => {}); } catch(e) {}
+  }
 }
+const rumbleSk = (s, strong, weak, ms) => { const p = humanOf(s); if (p >= 0) rumble(strong, weak, ms, p); };
 function padConfirm(){
-  const vis = id => !$(id).hidden;
+  const vis = id => $(id) && !$(id).hidden;
+  if (vis('ctrls')) return;
   if (vis('pause')) return setPaused(false);
   if (vis('brief')) return $('btnGo').click();
   if (vis('results')) return ($('resNext') || $('resRetry')).click();
   if (vis('kit')) return $('kitDone').click();
   if (vis('prac')) return $('pracGo').click();
-  if (vis('hub')) { const c = document.querySelector('.chal.next') || document.querySelector('.chal:not(:disabled)'); if (c) c.click(); }
+  if (vis('hub')) { const c = document.querySelector('.chal.next') || document.querySelector('.chal[data-i]:not(:disabled)'); if (c) c.click(); }
 }
 function padBack(){
-  const vis = id => !$(id).hidden;
+  const vis = id => $(id) && !$(id).hidden;
+  if (vis('ctrls')) return $('ctrlsDone').click();
   if (vis('brief')) return $('btnBack').click();
   if (vis('kit')) return $('kitDone').click();
   if (vis('results')) return $('resHub').click();
@@ -1541,58 +1668,92 @@ function padBack(){
   if (vis('pause')) return setPaused(false);
 }
 function pollPad(){
-  const g = findPad();
-  if (!!g !== !!pad.g || (g && g.id !== pad.name)) { pad.name = g ? g.id : ''; pad.prev = []; setTimeout(refreshPadNote, 0); }
-  pad.g = g;
-  if (!g) { pad.axes = [0,0]; pad.raxes = [0,0]; return; }
-  const now = g.buttons.map(b => !!b && (b.pressed || b.value > 0.5));
-  const down = i => now[i] && !pad.prev[i];
-  let x = g.axes[0] || 0, y = g.axes[1] || 0; const m = hyp(x, y);
-  if (m < 0.2) { x = 0; y = 0; } else { const k = Math.min(1, (m - 0.2)/0.75)/m; x *= k; y *= k; }
-  const dx = (now[15] ? 1 : 0) - (now[14] ? 1 : 0), dy = (now[13] ? 1 : 0) - (now[12] ? 1 : 0);
-  if (dx || dy) { const mm = hyp(dx, dy); x = dx/mm; y = dy/mm; }
-  pad.axes = [x, y];
-  { let rx = g.axes[2] || 0, ry = g.axes[3] || 0; const rm = hyp(rx, ry);
+  const found = scanPads(), seen = new Set();
+  let changed = false;
+  for (const g of found) {
+    seen.add(g.index);
+    let ps = pads.get(g.index);
+    if (!ps || ps.name !== g.id) { ps = { g, prev:[], axes:[0,0], raxes:[0,0], name:g.id }; pads.set(g.index, ps); changed = true; }
+    ps.g = g;
+    const now = g.buttons.map(b => !!b && (b.pressed || b.value > 0.5));
+    ps.now = now;
+    let x = g.axes[0] || 0, y = g.axes[1] || 0; const m = hyp(x, y);
+    if (m < 0.2) { x = 0; y = 0; } else { const k = Math.min(1, (m - 0.2)/0.75)/m; x *= k; y *= k; }
+    const dx = (now[15] ? 1 : 0) - (now[14] ? 1 : 0), dy = (now[13] ? 1 : 0) - (now[12] ? 1 : 0);
+    if (dx || dy) { const mm = hyp(dx, dy); x = dx/mm; y = dy/mm; }
+    ps.axes = [x, y];
+    let rx = g.axes[2] || 0, ry = g.axes[3] || 0; const rm = hyp(rx, ry);
     if (rm < 0.2) { rx = 0; ry = 0; } else { const k = Math.min(1, (rm - 0.2)/0.7)/rm; rx *= k; ry *= k; }
-    pad.raxes = [rx, ry]; }
-  const inGame = G && !G.attract && G.state !== 'end' && $('results').hidden;
-  if (down(9) || down(8)) { if (inGame && !paused) setPaused(true); else if (paused) setPaused(false); }
-  if (inGame && !paused) {
-    const sNow = now[0] || now[7], sPrev = pad.prev[0] || pad.prev[7];
-    if (sNow && !sPrev) { ensureAudio(); pressShoot(); }
-    if (!sNow && sPrev) releaseShoot();
-    if (down(2) || down(4) || down(6)) pressPass();
-    if (down(1) || down(3) || down(5)) usePower('home');
-  } else {
-    if (down(0)) { ensureAudio(); padConfirm(); }
-    if (down(1)) padBack();
+    ps.raxes = [rx, ry];
   }
-  pad.prev = now;
+  for (const k of [...pads.keys()]) if (!seen.has(k)) { pads.delete(k); changed = true; }
+  if (changed) setTimeout(refreshPadNote, 0);
+  const inGame = G && !G.attract && G.state !== 'end' && $('results').hidden;
+  for (const ps of pads.values()) {
+    const now = ps.now, down = i => now[i] && !ps.prev[i];
+    if (capture && capture.profile === 'pad') { const i = now.findIndex((b, i) => b && !ps.prev[i] && i !== 8 && i !== 9 && (i < 12 || i > 15)); if (i >= 0) bindCaptured(i); ps.prev = now; continue; }
+    if (down(9) || down(8)) { if (inGame && !paused) setPaused(true); else if (paused) setPaused(false); }
+    let p = -1; for (let q = 0; q < humans(); q++) if (devicesFor(q).pads.includes(ps)) p = q;
+    if (inGame && !paused && p >= 0) {
+      const B = binds.pad, on = a => (B[a] || []).some(i => now[i]), was = a => (B[a] || []).some(i => ps.prev[i]), hit = a => on(a) && !was(a);
+      if (hit('shoot')) { ensureAudio(); pressShoot(p); }
+      if (!on('shoot') && was('shoot')) releaseShoot(p);
+      if (hit('pass')) pressPass(p);
+      if (hit('power')) pressPower(p);
+      if (hit('deke')) pressDeke(p);
+    } else if (!inGame || paused) {
+      if (down(0)) { ensureAudio(); padConfirm(); }
+      if (down(1)) padBack();
+    }
+    ps.prev = now;
+  }
 }
 function padNoteText(){
-  if (pad.blocked) return 'Controllers are blocked in this view. Open the game in its own browser tab to use one.';
-  if (pad.g) return 'Controller connected. Left stick or D-pad skates · Right stick moves your stick: dangle side to side, sweep to poke check, pull back and flick forward to shoot · A or RT shoots (hold to wind up) and checks · X or LB passes and switches · B or RB fires your power-up · Start pauses · A picks and B goes back in menus.';
-  return 'Got a controller? Connect it and press any button.';
+  if (padBlocked) return 'Controllers are blocked in this view. Open the game in its own browser tab to use one.';
+  const n = pads.size;
+  if (n >= 2) return `${n} controllers connected: two-player co-op and versus are ready. Left stick skates, right stick handles the stick (pull back and flick to shoot), and the buttons can be changed under Controls.`;
+  if (n === 1) return 'Controller connected. Left stick skates · right stick moves your stick (dangle, poke, pull back and flick to shoot) · buttons can be changed under Controls. Connect a second controller, or use the keyboard, for two players.';
+  return 'Got a controller? Connect it and press any button. Two players can share one keyboard, a keyboard and a controller, or two controllers.';
 }
-function refreshPadNote(){ const el = $('padNote'); if (el) el.textContent = padNoteText(); renderCtrlBar(); if (pad.g && G && !G.attract) toast('Controller', 'Connected', 1400, 'small'); }
+function refreshPadNote(){ const el = $('padNote'); if (el) el.textContent = padNoteText(); renderCtrlBar(); if (pads.size && G && !G.attract) toast('Controller', `${pads.size} connected`, 1400, 'small'); }
+
+// ---------------- names for keys and buttons
+const KEY_NAMES = { Space:'Space', ShiftLeft:'L Shift', ShiftRight:'R Shift', ControlLeft:'L Ctrl', ControlRight:'R Ctrl', AltLeft:'L Alt', AltRight:'R Alt', MetaLeft:'⌘', MetaRight:'R ⌘', Enter:'Enter', Tab:'Tab', Backspace:'⌫', CapsLock:'Caps',
+  ArrowUp:'↑', ArrowDown:'↓', ArrowLeft:'←', ArrowRight:'→', Slash:'/', Period:'.', Comma:',', Semicolon:';', Quote:"'", BracketLeft:'[', BracketRight:']', Backslash:'\\', Minus:'-', Equal:'=', NumpadEnter:'Num Enter', NumpadDecimal:'Num .' };
+function keyName(c){ if (KEY_NAMES[c]) return KEY_NAMES[c]; if (/^Key/.test(c)) return c.slice(3); if (/^Digit/.test(c)) return c.slice(5); if (/^Numpad/.test(c)) return 'Num ' + c.slice(6); return c; }
+function padLabels(ps){
+  const id = ((ps || padList()[0] || {}).name || '').toLowerCase();
+  const F = (t, bg, fg = '#fff') => ({ t, bg, fg, face:true }), S = (t, trig) => ({ t, trig:!!trig });
+  let fam = 'xbox';
+  if (/054c|dualsense|dualshock|playstation/.test(id)) fam = 'ps'; else if (/057e|pro controller|joy-con|nintendo/.test(id)) fam = 'ns';
+  const names = {
+    xbox:[F('A','#3fae49'), F('B','#e0453c'), F('X','#2f7de1'), F('Y','#e6b422','#1a1a1a'), S('LB'), S('RB'), S('LT',1), S('RT',1), S('View'), S('☰ Menu'), S('L3'), S('R3')],
+    ps:[F('✕','#1d1f26','#7fa7ff'), F('○','#1d1f26','#ff6b6b'), F('□','#1d1f26','#f08fd3'), F('△','#1d1f26','#4fd6b6'), S('L1'), S('R1'), S('L2',1), S('R2',1), S('Share'), S('Options'), S('L3'), S('R3')],
+    ns:[F('B','#2a2c33'), F('A','#2a2c33'), F('Y','#2a2c33'), F('X','#2a2c33'), S('L'), S('R'), S('ZL',1), S('ZR',1), S('−'), S('+'), S('L3'), S('R3')],
+  }[fam];
+  return { name: fam === 'ps' ? 'PlayStation controller' : fam === 'ns' ? 'Switch controller' : 'Xbox controller', btn: i => names[i] || S('B' + i),
+    stick:S('L stick'), rstick:S('R stick'), dpad:S('D-pad'), start:names[9] };
+}
 // ---------------- controls strip (toggled from the scoreboard)
 let ctrlBarOn = true;
 try { ctrlBarOn = localStorage.getItem('rinkrat-ctrlbar') !== '0'; } catch(e) {}
-function padLabels(){
-  const id = (pad.name || '').toLowerCase();
-  // face buttons: { t:text, bg, fg, face:true }; shoulders/triggers: { t, trig:true }
-  const F = (t, bg, fg = '#fff') => ({ t, bg, fg, face:true }), S = (t, trig) => ({ t, trig:!!trig });
-  if (/054c|dualsense|dualshock|playstation/.test(id)) return { name:'PlayStation controller', stick:S('L stick'), rstick:S('R stick'), dpad:S('D-pad'),
-    a:F('✕', '#1d1f26', '#7fa7ff'), b:F('○', '#1d1f26', '#ff6b6b'), x:F('□', '#1d1f26', '#f08fd3'), rt:S('R2', 1), lb:S('L1'), rb:S('R1'), start:S('Options') };
-  if (/057e|pro controller|joy-con|nintendo/.test(id)) return { name:'Switch controller', stick:S('L stick'), rstick:S('R stick'), dpad:S('D-pad'),
-    a:F('B', '#2a2c33'), b:F('A', '#2a2c33'), x:F('Y', '#2a2c33'), rt:S('ZR', 1), lb:S('L'), rb:S('R'), start:S('+') };
-  return { name:'Xbox controller', stick:S('L stick'), rstick:S('R stick'), dpad:S('D-pad'),
-    a:F('A', '#3fae49'), b:F('B', '#e0453c'), x:F('X', '#2f7de1'), rt:S('RT', 1), lb:S('LB'), rb:S('RB'), start:S('☰ Menu') };
-}
 function ctrlItems(){
-  if (pad.g) { const L = padLabels(); return { src:L.name, items:[[[L.stick, L.dpad], 'Skate'], [[L.rstick], 'Stickhandle · pull back, flick to shoot'], [[L.a, L.rt], 'Shoot (hold) · check'], [[L.x, L.lb], 'Pass · switch'], [[L.b, L.rb], 'Power-up'], [[L.start], 'Pause']] }; }
+  const kbKeys = (prof, a) => (binds[prof][a] || []).map(keyName);
+  if (G && !G.attract && humans() > 1) {
+    const items = [];
+    for (let p = 0; p < 2; p++) {
+      const d = devicesFor(p), tag = `P${p+1}`;
+      if (d.pads.length) { const L = padLabels(d.pads[0]); items.push([[L.stick], `${tag} skate`], [binds.pad.shoot.slice(0, 1).map(L.btn), 'shoot'], [binds.pad.pass.slice(0, 1).map(L.btn), 'pass'], [binds.pad.deke.slice(0, 1).map(L.btn), 'deke']); }
+      else { const k = d.kb; items.push([[['up','left','down','right'].map(a => kbKeys(k, a)[0]).join('')], `${tag} skate`], [kbKeys(k, 'shoot').slice(0, 1), 'shoot'], [kbKeys(k, 'pass').slice(0, 1), 'pass'], [kbKeys(k, 'deke').slice(0, 1), 'deke']); }
+    }
+    return { src:'Two players', items };
+  }
+  const pl = padList();
+  if (pl.length) { const L = padLabels(pl[0]), b = a => binds.pad[a].slice(0, 2).map(L.btn); return { src:L.name, items:[[[L.stick, L.dpad], 'Skate'], [[L.rstick], 'Stickhandle · pull back, flick to shoot'], [b('shoot'), 'Shoot (hold) · check'], [b('pass'), 'Pass · switch'], [b('deke'), 'Deke'], [b('power'), 'Power-up'], [[L.start], 'Pause']] }; }
   if (matchMedia('(pointer:coarse)').matches) return { src:'Touch', items:[[['Left side'], 'Drag to skate'], [['Shoot'], 'Hold · tap to check'], [['Pass'], 'Pass · switch'], [['Power'], 'Power-up']] };
-  return { src:'Keyboard', items:[[['WASD', 'Arrows'], 'Skate'], [['IJKL'], 'Stickhandle · pull back, flick to shoot'], [['Space'], 'Shoot (hold) · check'], [['Shift'], 'Pass · switch'], [['E'], 'Power-up'], [['P'], 'Pause'], [['M'], 'Mute'], [['`'], 'Tuning']] };
+  const k = a => kbKeys('kb', a).slice(0, 2);
+  const mv = ['up','left','down','right'].map(a => kbKeys('kb', a)[0]).join('');
+  return { src:'Keyboard', items:[[[mv], 'Skate'], [[['stUp','stLeft','stDown','stRight'].map(a => kbKeys('kb', a)[0] || '').join('')], 'Stickhandle · pull back, flick to shoot'], [k('shoot'), 'Shoot (hold) · check'], [k('pass'), 'Pass · switch'], [k('deke'), 'Deke'], [k('power'), 'Power-up'], [['P'], 'Pause'], [['M'], 'Mute'], [['`'], 'Tuning']] };
 }
 function keyHtml(k){
   if (typeof k === 'string') return `<kbd>${k}</kbd>`;
@@ -1605,8 +1766,38 @@ function renderCtrlBar(){
   btn.setAttribute('aria-pressed', String(ctrlBarOn)); btn.setAttribute('aria-label', ctrlBarOn ? 'Hide controls' : 'Show controls'); btn.title = ctrlBarOn ? 'Hide controls' : 'Show controls';
   if (!ctrlBarOn) return;
   const { src, items } = ctrlItems();
-  bar.innerHTML = `<span class="ck src">${src.toUpperCase()}</span>` + items.map(([keys, label]) => `<span class="ck">${keys.map(keyHtml).join('<span class="or">/</span>')}<span class="lbl">${label}</span></span>`).join('');
+  bar.innerHTML = `<span class="ck src">${src.toUpperCase()}</span>` + items.filter(([ks]) => ks.length && ks[0] !== '').map(([keys, label]) => `<span class="ck">${keys.map(keyHtml).join('<span class="or">/</span>')}<span class="lbl">${label}</span></span>`).join('');
 }
+
+// ---------------- remap screen
+let ctrlsTab = 'kb', ctrlsFrom = 'hub';
+function openControls(from){ ctrlsFrom = from || 'hub'; ctrlsTab = padList().length ? 'pad' : 'kb'; renderControls(); show('ctrls'); }
+function renderControls(){
+  const prof = ctrlsTab, isPad = prof === 'pad', L = padLabels();
+  const acts = isPad ? ACTIONS.filter(([a]) => PAD_ACTIONS.includes(a)) : ACTIONS;
+  const chip = (v, a, i) => `<span class="bchip">${isPad ? keyHtml(L.btn(v)) : `<kbd>${keyName(v)}</kbd>`}<button type="button" class="bx" data-a="${a}" data-i="${i}" aria-label="Remove">×</button></span>`;
+  $('ctrlsWrap').innerHTML = `
+    <div class="sticky"><div style="display:flex;flex-direction:column;gap:6px"><h2 class="h">Controls</h2><span class="slots">CLICK CHANGE, THEN PRESS A ${isPad ? 'BUTTON' : 'KEY'}</span></div><button class="btn small" id="ctrlsDoneTop" type="button">Done</button></div>
+    <div class="seg" id="ctrlsTabs">${BIND_PROFILES.map(([k, l]) => `<button type="button" data-p="${k}" aria-pressed="${k === prof}">${l}</button>`).join('')}</div>
+    <p class="gfxnote">${isPad ? 'Sticks are fixed: left skates, right moves your stick. The D-pad also skates. Start pauses.' : prof === 'kb' ? 'Used when you play alone, or as player 1 when player 2 has a controller.' : prof === 'kb1' ? 'Player 1 when two people share one keyboard.' : 'Player 2 when two people share one keyboard.'} P / Esc pause, M mutes and \` opens tuning on every keyboard.</p>
+    <div class="card bindlist">${acts.map(([a, label]) => `<div class="brow${capture && capture.profile === prof && capture.action === a ? ' cap' : ''}"><span class="bl">${label}</span><span class="bv">${capture && capture.profile === prof && capture.action === a ? `<em>Press a ${isPad ? 'button' : 'key'}… (${isPad ? 'Start' : 'Esc'} cancels)</em>` : ((binds[prof][a] || []).map((v, i) => chip(v, a, i)).join('') || '<em>none</em>')}</span><button class="btn ghost small" type="button" data-change="${a}">Change</button></div>`).join('')}</div>
+    <div class="btns"><button class="btn ghost" id="ctrlsReset" type="button">Reset ${BIND_PROFILES.find(p => p[0] === prof)[1]}</button><button class="btn" id="ctrlsDone" type="button">Done</button></div>`;
+  $('ctrlsWrap').querySelectorAll('#ctrlsTabs button').forEach(b => b.onclick = () => { endCapture(true); ctrlsTab = b.dataset.p; renderControls(); });
+  $('ctrlsWrap').querySelectorAll('[data-change]').forEach(b => b.onclick = () => { capture = { profile:prof, action:b.dataset.change }; renderControls(); });
+  $('ctrlsWrap').querySelectorAll('.bx').forEach(b => b.onclick = () => { binds[prof][b.dataset.a].splice(Number(b.dataset.i), 1); saveBinds(); renderControls(); renderCtrlBar(); });
+  $('ctrlsReset').onclick = () => { binds[prof] = JSON.parse(JSON.stringify(DEF_BINDS[prof])); saveBinds(); endCapture(true); renderControls(); renderCtrlBar(); };
+  const done = () => { endCapture(true); renderCtrlBar(); if (ctrlsFrom === 'pause' && G && !G.attract) { paused = true; preparePause(G.state === 'end'); show('pause'); } else { renderHub(); show('hub'); } };
+  $('ctrlsDone').onclick = done; $('ctrlsDoneTop').onclick = done;
+}
+function bindCaptured(v){
+  if (!capture) return;
+  const { profile, action } = capture;
+  if (profile !== 'pad' && FIXED_KEYS.includes(v)) { endCapture(); return; }
+  for (const a in binds[profile]) binds[profile][a] = (binds[profile][a] || []).filter(x => x !== v);   // one action per key
+  binds[profile][action] = [v, ...(binds[profile][action] || [])].slice(0, 2);
+  saveBinds(); capture = null; renderControls(); renderCtrlBar();
+}
+function endCapture(silent){ capture = null; if (!silent && !$('ctrls').hidden) renderControls(); }
 
 window.addEventListener('gamepadconnected', () => { pollPad(); });
 window.addEventListener('gamepaddisconnected', () => { pollPad(); if (G && !G.attract && !paused && G.state !== 'end') setPaused(true); });
@@ -1638,14 +1829,15 @@ function update(dt){
     if (G.ch.len > 0) { G.clock -= dt; if (G.clock <= 0) { G.clock = 0; endMatch(); return; } }
     if (G.awayWait > 0) G.awayWait -= dt;
     if (rule('powerups')) crateLogic(dt);
-    if (!G.practice || G.effort === 'full') aiPowers('away', dt); if (G.attract) aiPowers('home', dt);
+    if ((!G.practice || G.effort === 'full' || G.mode === 'vs') && !teamHasHuman('away')) aiPowers('away', dt); if (G.attract) aiPowers('home', dt);
   }
-  G.switchCd = Math.max(0, G.switchCd - dt);
+  G.switchCd = Math.max(0, G.switchCd - dt); G.switchCd2 = Math.max(0, (G.switchCd2 || 0) - dt);
   const cs = ctrlSk();
-  if (cs && !G.attract && G.switchCd <= 0 && G.state === 'play') {
-    const P = G.pucks[0];
-    if (cs.ko > 0) autoSwitch(true);
-    else if (!(P.owner && P.owner.team === 'home') && !(P.passTo && P.passTo.team === 'home')) autoSwitch(false);
+  if (!G.attract && G.state === 'play') for (let p = 0; p < humans(); p++) {
+    const hs = humanSk(p), tm = humanTeam(p), P = G.pucks[0];
+    if (!hs || (p === 0 ? G.switchCd : G.switchCd2) > 0) continue;
+    if (hs.ko > 0) autoSwitch(true, p);
+    else if (G.mode !== 'coop' && !(P.owner && P.owner.team === tm) && !(P.passTo && P.passTo.team === tm)) autoSwitch(false, p);
   }
   for (const s of G.sk) {
     s.cool = Math.max(0, s.cool-dt); s.pokeCd = Math.max(0, s.pokeCd-dt); s.lunge = Math.max(0, s.lunge-dt); s.hitImm = Math.max(0, s.hitImm-dt);
@@ -1655,20 +1847,30 @@ function update(dt){
     if (s.ko > 0) { s.ko -= dt; if (s.ko <= 0) { s.ko = 0; s.hp = 100; s.inv = 1.4; s.x = 4.5; s.y = s.team === 'home' ? 112 : 88; s.vx = 14; s.vy = 0; s.face = 0; s.stun = 0; } }
     if (s.hp < 100 && s.ko <= 0) s.hp = Math.min(100, s.hp + dt*2.5);
   }
-  for (const s of G.sk) { s.skIn = null; s.recv = Math.max(0, (s.recv || 0) - dt); if (s.dk > 0) s.dk -= dt; }
-  if (cs && !G.attract && (G.state === 'play' || G.state === 'regroup') && cs.ko <= 0) { const v = readSkill(); if (v[0] || v[1]) cs.skIn = v; }
-  if (cs && G.state === 'play') skillShot(cs, dt);
+  for (const s of G.sk) {
+    s.skIn = null; s.recv = Math.max(0, (s.recv || 0) - dt); if (s.dk > 0) s.dk -= dt;
+    s.dekeCd = Math.max(0, (s.dekeCd || 0) - dt); s.faked = Math.max(0, (s.faked || 0) - dt);
+    if (s.deke) { s.deke.t += dt; if (s.deke.t >= s.deke.dur || G.pucks[0].owner !== s) s.deke = null; }
+    if (s.ot > 0) { s.ot -= dt; if (s.ot <= 0 || G.pucks[0].passTo !== s) { s.ot = 0; if (G.pucks[0].owner !== s) s.charging = false; } else s.charge = Math.min(1, (s.charge || 0) + dt/0.6); }
+    // computer players sometimes one-time a pass in the attacking zone
+    const P = G.pucks[0];
+    if (P.passTo === s && !isHuman(s) && !s.otTried && G.state === 'play') { s.otTried = true; if (hyp(CX - s.x, goalY(s.team) - s.y) < 46 && Math.random() < 0.35) armOneTimer(s); }
+    if (P.passTo !== s) s.otTried = false;
+  }
+  for (let p = 0; p < humans(); p++) { const hs = humanSk(p); if (!hs || G.attract) continue;
+    if ((G.state === 'play' || G.state === 'regroup') && hs.ko <= 0) { const v = readSkill(p); if (v[0] || v[1]) hs.skIn = v; }
+    if (G.state === 'play') skillShot(hs, dt);
+    if (hs.charging) hs.charge = Math.min(1, hs.charge + dt/TUNE.chargeTime);
+    if (G.pucks[0].owner !== hs && !(hs.ot > 0)) hs.charging = false; }
   { const P = G.pucks[0], o = P.owner;   // AI puck carriers deke when a defender closes in front of them
-    if (o && o !== cs && (o.dk || 0) <= 0 && G.state === 'play') for (const d of G.sk) { if (d.team === o.team || d.ko > 0) continue; const dx = d.x - o.x, dy = d.y - o.y, dd = hyp(dx, dy); if (dd < 9 && Math.abs(angDiff(Math.atan2(dy, dx), o.face)) < 0.9 && Math.random() < dt*2.2) { o.dk = rand(0.3, 0.45); o.dkA = (o.dkA || 1) > 0 ? -1.15 : 1.15; break; } } }
-  if (cs && cs.charging) cs.charge = Math.min(1, cs.charge + dt/TUNE.chargeTime);
+    if (o && !isHuman(o) && (o.dk || 0) <= 0 && G.state === 'play') for (const d of G.sk) { if (d.team === o.team || d.ko > 0) continue; const dx = d.x - o.x, dy = d.y - o.y, dd = hyp(dx, dy); if (dd < 9 && Math.abs(angDiff(Math.atan2(dy, dx), o.face)) < 0.9 && Math.random() < dt*2.2) { if (Math.random() < 0.45 && startDeke(o, Math.random() < 0.5 ? null : [Math.cos(o.face + (o.dkA > 0 ? 1.2 : -1.2)), Math.sin(o.face + (o.dkA > 0 ? 1.2 : -1.2))])) { o.dk = 1.2; break; } o.dk = rand(0.3, 0.45); o.dkA = (o.dkA || 1) > 0 ? -1.15 : 1.15; break; } } }
   if (cs && !G.attract && cs.ko <= 0 && cs.stun <= 0 && cs.frozen <= 0) {   // stride sounds
     const csp = hyp(cs.vx, cs.vy), [ix, iy] = readInput();
     cs.strideT = (cs.strideT || 0) - dt;
     if (csp > 9 && (ix || iy) && !cs.braking && cs.strideT <= 0) { sfx('skate', 0.55 + csp/50); cs.strideT = 0.44 - Math.min(0.2, csp/130); }
   }
-  if (cs && G.pucks[0].owner !== cs) cs.charging = false;
   const P0 = G.pucks[0]; if (P0.passTo) { P0.passT -= dt; if (P0.passT <= 0 || P0.owner) P0.passTo = null; }
-  const inputs = G.sk.map(s => G.state === 'regroup' ? regroupInput(s, cs) : (s === cs && G.state === 'play') ? readInput() : (G.state === 'play' ? aiSkater(s, dt) : [0,0]));
+  const inputs = G.sk.map(s => { const hp = humanOf(s); return G.state === 'regroup' ? regroupInput(s) : (hp >= 0 && G.state === 'play') ? readInput(hp) : (G.state === 'play' ? aiSkater(s, dt) : [0,0]); });
   const sub = 3, h = dt/sub;
   for (let i=0;i<sub;i++){
     for (let k=0;k<G.sk.length;k++){ updSkater(G.sk[k], inputs[k][0], inputs[k][1], h); updBlade(G.sk[k], h); }
@@ -1799,7 +2001,7 @@ function drawHead(sp, r, t){
 }
 function drawSkater(s, t){
   const isHome = s.team === 'home', jer = isHome ? HOME.jersey : G.ch.opp.jersey, trim = isHome ? HOME.trim : G.ch.opp.trim;
-  const isCtrl = s === ctrlSk();
+  const hpI = humanOf(s), isCtrl = hpI >= 0;
   if (s.ko > 0) {
     ctx.save(); ctx.translate(s.x, s.y);
     const sp = SPECIES[s.species];
@@ -1813,7 +2015,7 @@ function drawSkater(s, t){
   const r = s.r;
   ctx.fillStyle = 'rgba(30,20,40,.2)'; ell(0.6, 0.8, r*1.05, r*0.85); ctx.fill();
   if (s.inv > 0 && Math.floor(t*12)%2) ctx.globalAlpha = 0.5;
-  if (isCtrl) { ctx.strokeStyle = '#ffb51e'; ctx.lineWidth = 0.45; ctx.setLineDash([1.1,0.7]); circ(0,0,r+1.2); ctx.stroke(); ctx.setLineDash([]); }
+  if (isCtrl) { ctx.strokeStyle = HUMAN_COL[hpI]; ctx.lineWidth = 0.45; ctx.setLineDash([1.1,0.7]); circ(0,0,r+1.2); ctx.stroke(); ctx.setLineDash([]); }
   if (s.magnet > 0) { ctx.strokeStyle = 'rgba(126,240,255,.6)'; ctx.lineWidth = 0.2; for (let i=0;i<2;i++){ circ(0,0, r+1.8 + ((t*6+i*1.2)%2.4)); ctx.stroke(); } }
   ctx.rotate(s.face);
   if (s.species === 'rat') { ctx.strokeStyle = '#d9909f'; ctx.lineWidth = 0.35; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-r*0.8,0); ctx.quadraticCurveTo(-r*1.7, Math.sin(t*7+s.idx)*r*0.9, -r*2.5, Math.sin(t*7+s.idx+1.5)*r*0.5); ctx.stroke(); }
@@ -1933,7 +2135,8 @@ function render(now){
   if (!G) return;
   const t = G.time;
   const viewH = ch/scale, P = G.pucks[0], cs = ctrlSk();
-  const focusY = cs && cs.ko <= 0 ? P.y*0.78 + cs.y*0.22 : P.y;
+  let hy = 0, hn = 0; if (!G.attract) for (let p = 0; p < humans(); p++) { const h = humanSk(p); if (h && h.ko <= 0) { hy += h.y; hn++; } }
+  const focusY = hn ? P.y*0.78 + hy/hn*0.22 : P.y;
   const lo = viewH/2 - 6, hi = RL - viewH/2 + 6;
   const want = lo > hi ? RL/2 : clamp(focusY - 3, lo, hi);
   camY += (want - camY) * Math.min(1, dt*4.5);
@@ -1988,7 +2191,7 @@ function render(now){
     if (s.hp >= 99.5 && s !== cs) continue;
     const [sx, sy] = W2S(s.x, s.y - s.r - 2.2), w = 26;
     ctx.fillStyle = 'rgba(15,10,20,.7)'; ctx.fillRect(sx - w/2 - 1, sy - 1, w + 2, 6);
-    ctx.fillStyle = s.hp > 55 ? '#74d38f' : s.hp > 25 ? '#ffb51e' : '#ec3b4f'; ctx.fillRect(sx - w/2, sy, w*Math.max(0, s.hp)/100, 4);
+    ctx.fillStyle = hpCol(s.hp/100); ctx.fillRect(sx - w/2, sy, w*Math.max(0, s.hp)/100, 4);
   }
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const p of G.pops) {
@@ -1997,9 +2200,10 @@ function render(now){
     ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(21,14,28,.9)'; ctx.strokeText(p.text, sx, sy); ctx.fillStyle = p.color; ctx.fillText(p.text, sx, sy);
   }
   ctx.globalAlpha = 1;
-  if (cs && cs.ko <= 0) {
-    const [sx, sy] = W2S(cs.x, cs.y);
-    if (sy < 8 || sy > ch - 8) { const ey = sy < 8 ? 14 : ch - 14, d = sy < 8 ? -1 : 1; ctx.fillStyle = '#ffb51e'; ctx.beginPath(); ctx.moveTo(sx, ey + d*8); ctx.lineTo(sx - 9, ey - d*4); ctx.lineTo(sx + 9, ey - d*4); ctx.closePath(); ctx.fill(); }
+  drawBadges((x, y) => { const [sx, sy] = W2S(x, y - 5.2); return [sx, sy, sy > -20 && sy < ch + 20]; }, t);
+  for (let p = 0; p < humans(); p++) { const hs = humanSk(p); if (!hs || hs.ko > 0 || G.attract) continue;
+    const [sx, sy] = W2S(hs.x, hs.y);
+    if (sy < 8 || sy > ch - 8) { const ey = sy < 8 ? 14 : ch - 14, d = sy < 8 ? -1 : 1; ctx.fillStyle = HUMAN_COL[p]; ctx.beginPath(); ctx.moveTo(sx, ey + d*8); ctx.lineTo(sx - 9, ey - d*4); ctx.lineTo(sx + 9, ey - d*4); ctx.closePath(); ctx.fill(); }
   }
   if (joy.id !== null) {
     let dx = joy.x - joy.bx, dy = joy.y - joy.by; const m = hyp(dx, dy); if (m > JR) { dx = dx/m*JR; dy = dy/m*JR; }
@@ -2075,13 +2279,14 @@ function comicHp(s, sx, sy){
   const para = (x, ww) => { ctx.beginPath(); ctx.moveTo(x + k, y0); ctx.lineTo(x + ww + k, y0); ctx.lineTo(x + ww, y0 + h); ctx.lineTo(x, y0 + h); ctx.closePath(); };
   para(x0 - 2, w + 4); ctx.fillStyle = '#150e1c'; ctx.fill();
   para(x0, w*dr); ctx.fillStyle = '#ffffff'; ctx.fill();
-  para(x0, w*hp); ctx.fillStyle = hp > 0.55 ? '#74d38f' : hp > 0.25 ? '#ffb51e' : '#ec3b4f'; ctx.fill();
+  para(x0, w*hp); ctx.fillStyle = hpCol(hp); ctx.fill();
   ctx.strokeStyle = '#150e1c'; ctx.lineWidth = 1.5; ctx.beginPath();
   for (let i=1;i<5;i++){ const x = x0 + w*i/5; ctx.moveTo(x + k, y0); ctx.lineTo(x, y0 + h); } ctx.stroke();
   para(x0 - 2, w + 4); ctx.lineWidth = 2.5; ctx.stroke();
 }
 let speedSeed = 0;
 function speedLines(power){
+  if (A11Y.rm) return;
   speedSeed++;
   const cx = cw/2, cy = ch/2, R = Math.hypot(cx, cy), n = 46;
   ctx.save(); ctx.lineCap = 'round';
@@ -2108,14 +2313,78 @@ function renderOverlay3D(R3){
   }
   for (const p of G.pops) { const [sx, sy, ok] = R3.project(p.x, p.y, 7.5); if (ok) comicPop(p, sx, sy); }
   ctx.globalAlpha = 1;
-  if (cs && cs.ko <= 0 && !G.attract) {
+  drawBadges((x, y, h) => R3.project(x, y, h), performance.now()/1000);
+  for (let p = 0; p < humans(); p++) { const cs = humanSk(p); if (!cs || cs.ko > 0 || G.attract) continue;
     const [sx, sy] = R3.project(cs.x, cs.y, 0);
-    if (sy < 8 || sy > ch - 8 || sx < 4 || sx > cw - 4) { const ex = clamp(sx, 16, cw - 16), ey = clamp(sy, 16, ch - 16), a = Math.atan2(sy - ey, sx - ex); ctx.save(); ctx.translate(ex, ey); ctx.rotate(a); ctx.fillStyle = '#ffb51e'; ctx.strokeStyle = '#150e1c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-7, -9); ctx.lineTo(-7, 9); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore(); }
+    if (sy < 8 || sy > ch - 8 || sx < 4 || sx > cw - 4) { const ex = clamp(sx, 16, cw - 16), ey = clamp(sy, 16, ch - 16), a = Math.atan2(sy - ey, sx - ex); ctx.save(); ctx.translate(ex, ey); ctx.rotate(a); ctx.fillStyle = HUMAN_COL[p]; ctx.strokeStyle = '#150e1c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-7, -9); ctx.lineTo(-7, 9); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore(); }
   }
   if (joy.id !== null) {
     let dx = joy.x - joy.bx, dy = joy.y - joy.by; const m = hyp(dx, dy); if (m > JR) { dx = dx/m*JR; dy = dy/m*JR; }
     ctx.strokeStyle = 'rgba(241,231,208,.5)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(joy.bx, joy.by, JR, 0, 7); ctx.stroke();
     ctx.fillStyle = 'rgba(255,181,30,.6)'; ctx.beginPath(); ctx.arc(joy.bx+dx, joy.by+dy, 20, 0, 7); ctx.fill();
+  }
+}
+// ---------------- player badges: P1/P2 tags, the power-up a player is holding, and timer rings for active effects
+const HUMAN_COL = ['#ffb51e', '#4fd6ff'];
+const iconCache = {};
+function iconImg(k, col){
+  const key = k + col; if (iconCache[key]) return iconCache[key];
+  const img = new Image();
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(k).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" ').replace(/currentColor/g, col));
+  return (iconCache[key] = img);
+}
+setTimeout(() => { for (const k of Object.keys(ICON)) for (const c of ['#ffb51e', '#c9a4ff', '#ff8a3d', '#7ef0ff']) iconImg(k, c); }, 0);   // warm the icon cache
+const EFFECTS = [['rocket', 'rocket', 3.2], ['magnet', 'magnet', 6], ['kaiju', 'kaiju', 6], ['frozen', 'freeze', 3]];
+function badgesFor(s){
+  const out = [], tm = s.team, hp = humanOf(s);
+  if (hp >= 0 && humans() > 1) out.push({ tag:'P' + (hp + 1), col:HUMAN_COL[hp] });
+  const held = G.power[tm];
+  if (held && s.ko <= 0) {
+    const holders = teamHasHuman(tm) ? [0, 1].filter(p => p < humans() && humanTeam(p) === tm).map(humanSk) : [powerUser(tm)];
+    if (holders.includes(s)) out.push({ icon:held, col: tm === 'home' ? '#ffb51e' : '#c9a4ff', ready:true });
+  }
+  const armed = G.armed[tm];
+  if (armed && s.ko <= 0) { const P = G.pucks[0], carrier = P.owner && P.owner.team === tm ? P.owner : (teamHasHuman(tm) ? humanSk(tm === 'away' ? 1 : 0) : null); if (carrier === s) out.push({ icon:armed.type, col:'#ff8a3d', frac:armed.t/14 }); }
+  for (const [k, ic, max] of EFFECTS) if (s[k] > 0) out.push({ icon:ic, col: k === 'frozen' ? '#7ef0ff' : tm === 'home' ? '#ffb51e' : '#c9a4ff', frac:Math.min(1, s[k]/max) });
+  return out;
+}
+function drawBadgeRow(list, sx, sy, t){
+  if (!list.length) return;
+  const R = 13, gap = 4, wTag = 26;
+  const widths = list.map(b => b.tag ? wTag : R*2), total = widths.reduce((a, b) => a + b, 0) + gap*(list.length - 1);
+  let x = sx - total/2;
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  list.forEach((b, i) => {
+    const w = widths[i], cx = x + w/2;
+    if (b.tag) {
+      ctx.fillStyle = b.col; ctx.strokeStyle = 'rgba(11,7,16,.9)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, sy - 9, w, 18, 6) : ctx.rect(x, sy - 9, w, 18); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#120c1a'; ctx.font = '12px Bungee, "Arial Black", Impact, sans-serif'; ctx.fillText(b.tag, cx, sy + 1);
+    } else {
+      ctx.fillStyle = 'rgba(18,12,26,.88)'; ctx.beginPath(); ctx.arc(cx, sy, R, 0, Math.PI*2); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = b.ready ? b.col : 'rgba(241,231,208,.35)';
+      if (b.ready) ctx.globalAlpha = 0.6 + 0.4*Math.sin(t*6);
+      ctx.beginPath(); ctx.arc(cx, sy, R, 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha = 1;
+      if (b.frac != null) { ctx.lineWidth = 3.2; ctx.strokeStyle = b.col; ctx.beginPath(); ctx.arc(cx, sy, R + 0.5, -Math.PI/2, -Math.PI/2 + Math.PI*2*Math.max(0, b.frac)); ctx.stroke(); }
+      const img = iconImg(b.icon, b.col); if (img.complete && img.naturalWidth) ctx.drawImage(img, cx - 9, sy - 9, 18, 18);
+    }
+    x += w + gap;
+  });
+  ctx.restore();
+}
+// proj(x, y, heightFt) -> [sx, sy, onScreen]
+function drawBadges(proj, t){
+  if (!G || G.attract) return;
+  for (const s of G.sk) {
+    if (s.ko > 0 && humanOf(s) < 0) continue;
+    const list = badgesFor(s); if (!list.length) continue;
+    const [sx, sy, ok] = proj(s.x, s.y, 11.5*(s.r/(s.baseR || SK_R))); if (ok) drawBadgeRow(list, sx, sy, t);
+  }
+  for (const g of [G.gH, G.gA]) {
+    if (g.off) continue;
+    const list = []; if (g.shrink > 0) list.push({ icon:'shrink', col:'#7ef0ff', frac:g.shrink/8 }); if (g.frozen > 0) list.push({ icon:'freeze', col:'#7ef0ff', frac:g.frozen/3 });
+    if (!list.length) continue;
+    const [sx, sy, ok] = proj(g.x, g.y, 10); if (ok) drawBadgeRow(list, sx, sy, t);
   }
 }
 // ---------------- graphics setting
@@ -2138,6 +2407,7 @@ function setGfx(p){
   refreshGfx();
 }
 window.__sim = {
+  humanSk, humans, humanOf, reducedMotion: () => !!A11Y.rm,
   audio: () => ({ ctx: AC ? AC.state : null, loaded: Object.values(sfxBuf).reduce((n, l) => n + l.length, 0), crowd: !!crowdSrc, muted, volume, crowdVol }),
   get G(){ return G; }, ctrlSk, stickPt, aimAngle, HOME, SPECIES,
   C:{ RW, RL, CR, CX, GT, GB, PL, PRt, ND, PUCK_R, SK_R, G_R },
@@ -2211,6 +2481,11 @@ function renderHub(){
       <label class="tog"><input type="checkbox" id="sndOn" ${muted ? '' : 'checked'}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Sound</b><small>Also the speaker button in the scoreboard, or press M</small></span></label>
       <label class="sl home snd"><span>Volume</span><input type="range" id="sndVol" min="0" max="100" step="5" value="${Math.round(volume*100)}"><b id="sndVolV">${Math.round(volume*100)}%</b></label>
       <label class="sl home snd"><span>Crowd</span><input type="range" id="sndCrowd" min="0" max="100" step="5" value="${Math.round(crowdVol*100)}"><b id="sndCrowdV">${Math.round(crowdVol*100)}%</b></label></div>
+    <div class="card gfx"><div class="kitrow"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><h3 class="h">Controls</h3><span class="xptext">Remap keys and controller buttons. Two players: one keyboard, keyboard + controller, or two controllers.</span></div><button class="btn ghost small" id="btnControls" type="button">Change</button></div></div>
+    <div class="card gfx"><h3 class="h">Accessibility</h3>
+      <label class="tog"><input type="checkbox" id="a_cb" ${A11Y.cb ? 'checked' : ''}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Color-blind friendly teams</b><small>Rats in amber and black, every opponent in blue and white; health bars go blue to magenta</small></span></label>
+      <label class="tog"><input type="checkbox" id="a_rm" ${A11Y.rm ? 'checked' : ''}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Reduce motion</b><small>No screen shake, goal-light flashing, speed lines or pulsing buttons</small></span></label>
+      <div class="prow"><span class="xptext">On-screen buttons</span>${segHtml('a_btn', [['normal','Normal'],['large','Large'],['xl','Extra large']], A11Y.btn)}</div></div>
     <div class="card gfx"><h3 class="h">Graphics</h3><div class="seg" id="gfxSeg">${GFX_OPTS.map(([k,l]) => `<button type="button" data-g="${k}" aria-pressed="${k===gfxPref}">${l}</button>`).join('')}</div><h3 class="h" style="margin-top:6px">3D engine</h3><div class="seg" id="engSeg">${[['webgpu','WebGPU'],['webgl','WebGL2 (compatibility)']].map(([k,l]) => `<button type="button" data-e="${k}" aria-pressed="${k===gfxEngine()}">${l}</button>`).join('')}</div><p class="gfxnote" id="gfxNote">${gfxStatusText()}</p></div>
     <p class="foot">Power-ups drop in yellow crates on the ice. Grab one and fire it from the power button.</p>
     <div class="card gfx"><h3 class="h">Save data</h3>
@@ -2224,6 +2499,10 @@ function renderHub(){
   $('btnKit').onclick = () => openKit('hub');
   document.querySelectorAll('#gfxSeg button').forEach(b => b.onclick = () => setGfx(b.dataset.g));
   $('sndOn').onchange = e => setMuted(!e.target.checked);
+  $('btnControls').onclick = () => openControls('hub');
+  $('a_cb').onchange = e => { A11Y.cb = e.target.checked; saveA11y(); applyA11y(); if (G && G.attract) startAttract(); };
+  $('a_rm').onchange = e => { A11Y.rm = e.target.checked; saveA11y(); applyA11y(); };
+  $('a_btn').querySelectorAll('button').forEach(b => b.onclick = () => { A11Y.btn = b.dataset.v; saveA11y(); applyA11y(); $('a_btn').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
   $('sndVol').oninput = e => { volume = Number(e.target.value)/100; $('sndVolV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-vol', String(volume)); } catch(err) {} ensureAudio(); applyVolume(); };
   $('sndCrowd').oninput = e => { crowdVol = Number(e.target.value)/100; $('sndCrowdV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-crowdvol', String(crowdVol)); } catch(err) {} ensureAudio(); applyVolume(); };
   $('sndVol').onchange = () => { sfx('stick', 1); };
@@ -2243,6 +2522,14 @@ function renderHub(){
   $('btnCfg').onclick = () => openGameCfg('hub');
   $('hubWrap').querySelectorAll('.chal[data-i]').forEach(b => b.onclick = () => openBrief(Number(b.dataset.i)));
 }
+let chMode = '1p';
+try { chMode = localStorage.getItem('rinkrat-chmode') === 'coop' ? 'coop' : '1p'; } catch(e) {}
+function playersNote(mode){
+  if (mode === '1p') return 'Keyboard, touch or any controller.';
+  const saved = G; G = { attract:false, mode, ch:{} };
+  const txt = `P1: ${deviceLabel(0)} · P2: ${deviceLabel(1)}` + (mode === 'vs' ? ' · P2 plays for the other team' : ' · both on the Rats');
+  G = saved; return txt;
+}
 function openBrief(i){
   selected = i; const c = CHALLENGES[i], st = starsOf(c.id);
   const goals = [[c.obj, 'OBJECTIVE', st[0]], [c.bonus[0], 'BONUS', st[1]], [c.bonus[1], 'BONUS', st[2]]];
@@ -2254,11 +2541,13 @@ function openBrief(i){
     <p class="lede" style="font-size:14px">They carry ${c.cpu.map(k => POWERS[k].name).join(', ')}. Bonus stars count only if you complete the objective.</p>
     <div class="kitrow"><div class="chips">${save.loadout.map(k => `<span class="chip">${svg(k)}${POWERS[k].name}</span>`).join('')}</div><button class="btn ghost small" id="briefKit" type="button">Change</button></div>
     <div class="kitrow"><span class="xptext">Rules and sliders: <b>${gameCustom() ? `custom (${gameCustom()} change${gameCustom() === 1 ? '' : 's'})` : 'standard'}</b></span><button class="btn ghost small" id="briefCfg" type="button">Change</button></div>
+    <div class="prow"><div class="kitrow"><span class="xptext">Players</span>${segHtml('chPlayers', [['1p','Solo'],['coop','2P co-op']], chMode)}</div><p class="gfxnote" id="chDevs">${chMode === 'coop' ? playersNote('coop') : ''}</p></div>
     <div class="btns"><button class="btn" id="btnGo" type="button">Drop the puck</button><button class="btn ghost" id="btnBack" type="button">Back to the locker room</button></div>`;
   show('brief');
   $('btnGo').onclick = () => startChallenge(i);
   $('btnBack').onclick = () => show('hub');
   $('briefKit').onclick = () => openKit('brief');
+  $('chPlayers').querySelectorAll('button').forEach(b => b.onclick = () => { chMode = b.dataset.v; try { localStorage.setItem('rinkrat-chmode', chMode); } catch(e) {} $('chPlayers').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); $('chDevs').textContent = chMode === 'coop' ? playersNote('coop') : ''; });
   $('briefCfg').onclick = () => openGameCfg('brief');
 }
 let kitReturn = 'hub';
@@ -2279,7 +2568,7 @@ function renderKit(){
   });
 }
 function show(which){
-  for (const id of ['hub','brief','kit','pause','results','prac']) $(id).hidden = id !== which;
+  for (const id of ['hub','brief','kit','pause','results','prac','ctrls']) $(id).hidden = id !== which;
   const menu = which === 'hub' || which === 'brief' || which === 'kit' || which === 'results' || (which === 'prac' && !pracLive);
   app.classList.toggle('menu', menu);
   if (which) { const el = $(which); el.scrollTop = 0; }
@@ -2293,19 +2582,19 @@ function refreshMenus(){
 function startChallenge(i){
   ensureAudio();
   const c = CHALLENGES[i]; selected = i;
-  newMatch(c, false);
+  newMatch(c, false, chMode);
   Object.keys(hudCache).forEach(k => delete hudCache[k]);
-  $('aAbbr').textContent = c.opp.abbr; $('aSw').style.background = c.opp.jersey; $('aSw').style.boxShadow = `inset 0 -3px 0 ${c.opp.trim}`;
+  $('aAbbr').textContent = c.opp.abbr; $('aSw').style.background = G.ch.opp.jersey; $('aSw').style.boxShadow = `inset 0 -3px 0 ${G.ch.opp.trim}`;
   $('arenaShort').textContent = c.arena.toUpperCase().slice(0, 14);
   $('objText').textContent = condText(c.obj, c);
-  show(null); paused = false;
+  show(null); paused = false; renderCtrlBar();
   setTimeout(resize, 30);
   toast(c.title, c.start ? `Down ${c.start[0]}–${c.start[1]}. ${condText(c.obj, c)}` : condText(c.obj, c), 1700, 'small');
   wake();
 }
 // ---------------- practice / game settings
 let pracLive = false, pracSnap = '', cfgMode = 'practice', cfgFrom = 'hub';
-const STRUCT_KEYS = ['arena','opp','mates','goalies','clock'];
+const STRUCT_KEYS = ['arena','players','opp','mates','goalies','clock'];
 const structKey = () => cfgMode === 'game' ? JSON.stringify([gameCfg.rules.hazards]) : JSON.stringify(STRUCT_KEYS.map(k => practice[k]).concat([practice.rules.hazards]));
 function segHtml(id, opts, cur){ return `<div class="seg" id="${id}">${opts.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${String(v) === String(cur)}">${l}</button>`).join('')}</div>`; }
 function openPractice(live){ cfgMode = 'practice'; pracLive = !!live; pracSnap = structKey(); renderPractice(); show('prac'); }
@@ -2320,6 +2609,8 @@ function renderPractice(){
     <div class="sticky"><div style="display:flex;flex-direction:column;gap:6px"><h2 class="h">${game ? 'Rules and sliders' : 'Practice'}</h2><span class="slots">${game ? 'APPLIES TO EVERY CHALLENGE' : 'NO XP · CHANGE ANYTHING'}</span></div><button class="btn small" id="pracGoTop" type="button">${pracLive ? 'Apply' : game ? 'Done' : 'Start'}</button></div>
     ${game ? `<p class="lede" style="font-size:14px">Standard is all rules on except icing, with both teams at 100%. Changes save automatically and stay on until you reset them. Some objectives need a rule: Body Count needs knockouts.</p>` : `<div class="card pset">
       <div class="prow"><h3 class="h">Arena</h3>${segHtml('p_arena', CHALLENGES.map(c => [c.id, short[c.id]]), practice.arena)}</div>
+      <div class="prow"><h3 class="h">Players</h3>${segHtml('p_players', [['1p','1 player'],['coop','2P co-op'],['vs','2P versus']], practice.players)}
+        <p class="gfxnote" id="p_devs">${playersNote(practice.players)}</p></div>
       <div class="prow"><h3 class="h">Opponents</h3>${segHtml('p_opp', [[0,'None'],[1,'1'],[2,'2'],[3,'3']], practice.opp)}</div>
       <div class="prow"><h3 class="h">Teammates</h3>${segHtml('p_mates', [[0,'None'],[1,'1'],[2,'2']], practice.mates)}</div>
       <div class="prow"><h3 class="h">Goalies</h3>${segHtml('p_goalies', [['both','Both'],['mine','Mine only'],['theirs','Theirs only'],['none','None']], practice.goalies)}</div>
@@ -2335,7 +2626,7 @@ function renderPractice(){
     </div>
     <div class="btns"><button class="btn" id="pracGo" type="button">${goLbl}</button><button class="btn ghost" id="pracBack" type="button">${backLbl}</button></div>`;
   const segBind = (id, key, num) => $(id).querySelectorAll('button').forEach(b => b.onclick = () => { practice[key] = num ? Number(b.dataset.v) : b.dataset.v; savePractice(); $(id).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
-  if (!game) { segBind('p_arena', 'arena'); segBind('p_opp', 'opp', true); segBind('p_mates', 'mates', true); segBind('p_goalies', 'goalies'); segBind('p_effort', 'effort'); segBind('p_clock', 'clock', true); }
+  if (!game) { segBind('p_players', 'players'); $('p_players').addEventListener('click', () => { $('p_devs').textContent = playersNote(practice.players); }); segBind('p_arena', 'arena'); segBind('p_opp', 'opp', true); segBind('p_mates', 'mates', true); segBind('p_goalies', 'goalies'); segBind('p_effort', 'effort'); segBind('p_clock', 'clock', true); }
   for (const [k] of RULES) $('r_' + k).onchange = e => { cfg.rules[k] = e.target.checked; persist(); };
   for (const tm of ['home','away']) for (const [k] of ATTRS) { const inp = $(`a_${tm}_${k}`); inp.oninput = () => { cfg.attrs[tm][k] = Number(inp.value)/100; $(`v_${tm}_${k}`).textContent = inp.value + '%'; persist(); }; }
   $('pracReset').onclick = () => { cfg.attrs = { home:defAttrs(), away:defAttrs() }; persist(); renderPractice(); };
@@ -2370,18 +2661,20 @@ function applyPracticeLive(){
 }
 function practiceCh(){
   const base = CHALLENGES.find(c => c.id === practice.arena) || CHALLENGES[0];
+  if (practice.players === 'coop' && practice.mates < 1) practice.mates = 1;     // P2 needs a skater
+  if (practice.players === 'vs' && practice.opp < 1) practice.opp = 1;
   return { ...base, title:'Practice', len:practice.clock, tier:3, start:null, short:false, obj:{ type:'practice' }, bonus:[],
     hz: practice.rules.hazards ? base.hz : {}, practice: JSON.parse(JSON.stringify(practice)) };
 }
 function startPractice(){
   ensureAudio();
   const c = practiceCh(); selected = null;
-  newMatch(c, false);
+  newMatch(c, false, practice.players);
   Object.keys(hudCache).forEach(k => delete hudCache[k]);
-  $('aAbbr').textContent = c.opp.abbr; $('aSw').style.background = c.opp.jersey; $('aSw').style.boxShadow = `inset 0 -3px 0 ${c.opp.trim}`;
-  $('arenaShort').textContent = 'PRACTICE';
+  $('aAbbr').textContent = c.opp.abbr; $('aSw').style.background = G.ch.opp.jersey; $('aSw').style.boxShadow = `inset 0 -3px 0 ${G.ch.opp.trim}`;
+  $('arenaShort').textContent = practice.players === 'vs' ? 'VERSUS' : 'PRACTICE';
   $('objText').textContent = condText(c.obj, c);
-  show(null); paused = false;
+  show(null); paused = false; renderCtrlBar();
   setTimeout(resize, 30);
   toast('Practice', 'Free play · no XP · pause for settings', 1700, 'small');
   wake();
@@ -2391,7 +2684,7 @@ function startAttract(){
   newMatch(c, true);
 }
 function showResults(r){
-  const c = r.ch, nIdx = CHALLENGES.indexOf(c), hasNext = nIdx < CHALLENGES.length - 1 && unlockedIdx(nIdx + 1);
+  const c = r.ch.base || r.ch, nIdx = CHALLENGES.indexOf(c), hasNext = nIdx < CHALLENGES.length - 1 && unlockedIdx(nIdx + 1);
   const labels = [c.obj, c.bonus[0], c.bonus[1]];
   const levelUp = r.after.L > r.before.L;
   $('resCard').innerHTML = `
@@ -2460,13 +2753,15 @@ function setPaused(p){
   if (!G || G.attract) return;
   if (!p && G.state === 'end') return;
   paused = p;
-  if (p) { preparePause(G.state === 'end'); keys.clear(); joy.id = null; const s = ctrlSk(); if (s) s.charging = false; show('pause'); }
+  if (p) { preparePause(G.state === 'end'); keys.clear(); joy.id = null; for (let p = 0; p < humans(); p++) { const s = humanSk(p); if (s) s.charging = false; } show('pause'); }
   else show(null);
 }
 $('btnPause').onclick = () => setPaused(!paused);
 $('btnResume').onclick = () => setPaused(false);
 $('btnRestart').onclick = () => { paused = false; if (G && G.practice) startPractice(); else startChallenge(selected); };
 $('btnTune').onclick = () => toggleTune(true);
+$('btnPauseCtrls').onclick = () => openControls('pause');
+applyA11y();
 $('btnPracSet').onclick = () => { if (G && G.practice) openPractice(true); else openGameCfg('pause'); };
 $('btnQuit').onclick = () => { paused = false; renderHub(); show('hub'); startAttract(); };
 function syncSound(){

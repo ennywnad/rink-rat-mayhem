@@ -11,6 +11,9 @@ A 3-on-3 mutant hockey brawler that runs in your browser. Lead the Rink Rats thr
 - **Seven challenges**, each one period with its own arena, hazards and objective: Opening Night, Hot Hands, Body Count, Brick Wall, Gravity Well, Shorthanded and the Mayhem Cup Final. Bonus objectives earn up to three stars each.
 - **Progression:** XP unlocks 12 power-ups and more loadout slots. The power-ups are Rocket Skates, Oil Slick, Fireball Puck, Land Mine, Magnet Stick, Shrink Ray, Ice Wall, Heat-Seeker, Kaiju Mode, Split Shot, Thunderstrike and Deep Freeze.
 - **Skill stick:** move your stick with the right stick to stickhandle and poke-check. Pull it back and flick it forward to shoot.
+- **One-timers and dekes:** press shoot while a pass is on its way to fire it straight off the pass. The deke button does a toe drag toward wherever the right stick points, or a between-the-legs move with the stick centred; defenders in front get fooled for a moment.
+- **Two players on one screen:** co-op (both on the Rats, in practice or any challenge) or versus (P1 Rats vs P2, in practice). Play with two controllers, a keyboard and a controller, or both on one keyboard.
+- **Power-up badges:** an icon over whoever holds the team's power-up, and a timer ring around players with an active effect.
 - **Practice rink:** choose 0–3 opponents, 0–2 teammates, the goalies, the opponents' effort and the clock. Drill opponents carry the puck, lob it up ice, then back off or loop behind their net.
 - **Rules and sliders:** turn icing, faceoffs after goals, checking, knockouts, hazards and power-ups on or off. Tune speed, acceleration, shot power, checking, puck control and goalie for each team from 50% to 150%. These work in practice and in the regular challenges.
 - **Live stoppages:** players skate to the faceoff dot after goals and icings instead of teleporting, and coasting skaters sometimes lift a skate.
@@ -25,12 +28,31 @@ A 3-on-3 mutant hockey brawler that runs in your browser. Lead the Rink Rats thr
 | Skill shot | Hold K (back), then tap I | Pull the right stick back, then flick it forward | — |
 | Shoot (hold to wind up) / body-check | Space | A / RT | Shoot button |
 | Pass / switch player | Shift | X / LB | Pass button |
+| Deke | Q | Y / R3 | — |
 | Power-up | E | B / RB | Power button |
 | Pause | P / Esc | Start / Menu | Pause button |
 | Feel tuning panel | ` (backtick) | Pause menu | Pause menu |
 | Mute / unmute | M | Pause menu | Speaker button |
 
 Controllers use the standard browser gamepad mapping (Xbox, PlayStation and Switch Pro all work). The on-screen controls strip shows the buttons for whatever you're using. The right stick follows the camera.
+
+Every key and controller button can be changed under **Controls** in the locker room or the pause menu.
+
+### Two players
+
+Pick **2P co-op** or **2P versus** in practice, or **2P co-op** on a challenge screen. Devices are assigned automatically:
+
+| Connected | Player 1 | Player 2 |
+| --- | --- | --- |
+| Two controllers | Controller 1 (+ keyboard) | Controller 2 |
+| One controller | Keyboard | Controller |
+| None | Left side of the keyboard: WASD skate, F shoot, G pass, R power-up, Q deke | Right side: arrows skate, / shoot, . pass, , power-up, ; deke |
+
+P1 is marked amber and P2 cyan.
+
+## Accessibility
+
+The **Accessibility** card in the locker room has a color-blind friendly team palette (Rats in amber and black, every opponent in blue and white, health bars blue to magenta), **Reduce motion** (no screen shake, goal-light flashing, speed lines or pulsing buttons; on by default if your system asks for reduced motion) and three sizes of on-screen buttons for phones (Large by default on touch screens).
 
 ## Graphics
 
@@ -75,7 +97,7 @@ npm run serve &
 npm test
 ```
 
-The test plays a few seconds of a challenge and a practice in both the classic and 3D views, round-trips a save code, and fails on any page error. GitHub Actions runs it on every push, then deploys to GitHub Pages.
+The test plays a few seconds of a challenge and a practice in both the classic and 3D views, starts a two-player versus game and checks that player 2 can skate, round-trips a save code, and fails on any page error. GitHub Actions runs it on every push, then deploys to GitHub Pages.
 
 ## Project layout
 

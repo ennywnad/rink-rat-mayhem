@@ -730,12 +730,18 @@ async function init(){
   const starMesh = new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.35, 0), new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(3.5, 2.8, 0.6) }), 40); starMesh.frustumCulled = false; dyn.add(starMesh);
   const blobTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const rg = g.createRadialGradient(32,32,0,32,32,32); rg.addColorStop(0,'rgba(0,0,0,.55)'); rg.addColorStop(0.6,'rgba(0,0,0,.25)'); rg.addColorStop(1,'rgba(0,0,0,0)'); g.fillStyle = rg; g.fillRect(0,0,64,64); return canvasTex(c, false); })();
   const blobMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI/2), new THREE.MeshBasicNodeMaterial({ map:blobTex, transparent:true, depthWrite:false, color:0x000000 }), 16); blobMesh.frustumCulled = false; blobMesh.renderOrder = 1; dyn.add(blobMesh);
-  const ctrlRing = new THREE.Mesh(new THREE.RingGeometry(3.1, 3.5, 48), new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(1.6, 0.95, 0.12), transparent:true, opacity:0.9, depthWrite:false })); ctrlRing.rotation.x = -Math.PI/2; dyn.add(ctrlRing);
-  const chargeU = uniform(0);
-  const chargeRing = (() => { const m = new THREE.MeshBasicNodeMaterial({ color:new THREE.Color(2.2, 1.4, 0.2), transparent:true, depthWrite:false }); const q = uv().sub(0.5); const ang = atan(q.x, q.y).add(PI).div(PI.mul(2)); m.opacityNode = step(ang, chargeU); const r = new THREE.Mesh(new THREE.RingGeometry(3.8, 4.4, 64), m); r.rotation.x = -Math.PI/2; r.visible = false; dyn.add(r); return r; })();
-  const aimTex = (() => { const c = document.createElement('canvas'); c.width = 16; c.height = 64; const g = c.getContext('2d'); g.clearRect(0,0,16,64); g.fillStyle = '#fff'; g.fillRect(0,0,16,34); const t = canvasTex(c); t.wrapT = THREE.RepeatWrapping; return t; })();
-  const aimMat = new THREE.MeshBasicNodeMaterial({ map:aimTex, transparent:true, depthWrite:false, color:new THREE.Color(2.4, 1.5, 0.2) });
-  const aimLine = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 1).rotateX(-Math.PI/2).translate(0, 0, -0.5), aimMat); aimLine.visible = false; dyn.add(aimLine);
+  // per-player markers: control ring, shot-charge ring and aim line (P1 amber, P2 cyan)
+  function mkHumanFx(ringCol, chargeCol, aimCol){
+    const ring = new THREE.Mesh(new THREE.RingGeometry(3.1, 3.5, 48), new THREE.MeshBasicNodeMaterial({ color:ringCol, transparent:true, opacity:0.9, depthWrite:false })); ring.rotation.x = -Math.PI/2; ring.visible = false; dyn.add(ring);
+    const chargeU = uniform(0);
+    const charge = (() => { const m = new THREE.MeshBasicNodeMaterial({ color:chargeCol, transparent:true, depthWrite:false }); const q = uv().sub(0.5); const ang = atan(q.x, q.y).add(PI).div(PI.mul(2)); m.opacityNode = step(ang, chargeU); const r = new THREE.Mesh(new THREE.RingGeometry(3.8, 4.4, 64), m); r.rotation.x = -Math.PI/2; r.visible = false; dyn.add(r); return r; })();
+    const aimTex = (() => { const c = document.createElement('canvas'); c.width = 16; c.height = 64; const g = c.getContext('2d'); g.clearRect(0,0,16,64); g.fillStyle = '#fff'; g.fillRect(0,0,16,34); const t = canvasTex(c); t.wrapT = THREE.RepeatWrapping; return t; })();
+    const aim = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 1).rotateX(-Math.PI/2).translate(0, 0, -0.5), new THREE.MeshBasicNodeMaterial({ map:aimTex, transparent:true, depthWrite:false, color:aimCol })); aim.visible = false; dyn.add(aim);
+    return { ring, chargeU, charge, aimTex, aim };
+  }
+  const humanFx = [mkHumanFx(new THREE.Color(1.6, 0.95, 0.12), new THREE.Color(2.2, 1.4, 0.2), new THREE.Color(2.4, 1.5, 0.2)),
+                   mkHumanFx(new THREE.Color(0.3, 1.35, 1.9), new THREE.Color(0.4, 1.8, 2.6), new THREE.Color(0.5, 1.9, 2.6))];
+  const ctrlRing = humanFx[0].ring;
 
   // ------------------------------------------------ players
   const DOWN = new THREE.Vector3(0, -1, 0);
@@ -1333,10 +1339,13 @@ async function init(){
   function spring(cur, vel, target, k, dt){ const c = 2*Math.sqrt(k); const a = k*(target - cur) - c*vel; vel += a*dt; return [cur + vel*dt, vel]; }
   const _cf = new THREE.Vector3(), _cr = new THREE.Vector3();
   function updateCamera(G, dt){
-    const P = G.pucks[0], cs = S.ctrlSk();
+    const P = G.pucks[0];
     let tx, ty = 0, tz, px, py, pz;
     const fx = P.x - CX, fz = P.y - RL/2;
-    const focusX = cs && cs.ko <= 0 ? fx*0.75 + (cs.x - CX)*0.25 : fx, focusZ = cs && cs.ko <= 0 ? fz*0.78 + (cs.y - RL/2)*0.22 : fz;
+    // lean toward the human players (both of them in two-player games)
+    let hx = 0, hz = 0, hn = 0;
+    if (!G.attract) for (let p = 0; p < S.humans(); p++) { const h = S.humanSk(p); if (h && h.ko <= 0) { hx += h.x - CX; hz += h.y - RL/2; hn++; } }
+    const focusX = hn ? fx*0.75 + hx/hn*0.25 : fx, focusZ = hn ? fz*0.78 + hz/hn*0.22 : fz;
     if (G.attract) {
       // stays over the ice and above the lower seats, so the stands never block the view
       orbitA += dt*0.07; const R = 70;
@@ -1457,7 +1466,7 @@ async function init(){
     // goal lights
     for (const n of nets) {
       const lit = goalT >= 0 && goalT < 3 && n.team !== goalTeam;
-      n.domeU.value = lit ? 0.6 + 0.4*Math.sin(t*14) : 0.05;
+      n.domeU.value = lit ? (S.reducedMotion() ? 0.85 : 0.6 + 0.4*Math.sin(t*14)) : 0.05;
       if (n.ripple > 0) { n.ripple = Math.max(0, n.ripple - dt*0.8); const r = n.ripple; n.mesh.scale.set(1 + Math.sin(t*30)*0.04*r, 1 + Math.sin(t*25)*0.03*r, 1 + r*0.12 + Math.sin(t*22)*0.05*r); }
     }
     goalPoint.intensity = goalT >= 0 && goalT < 3 ? 900*(0.6 + 0.4*Math.sin(t*14)) : 0;
@@ -1547,17 +1556,19 @@ async function init(){
       for (const g of [G.gH, G.gA]) { if (g.off) continue; blob(g.x, g.y, 6.5*(g.r/S.C.G_R)); if (g.stun > 0 && n < 37) for (let i=0;i<3;i++){ const a = t*5 + i*2.1; tmpM.compose(W(g.x + Math.cos(a)*1.8, g.y + Math.sin(a)*1.8, 2.4, tmpV), tmpQ.identity(), tmpS.setScalar(1)); starMesh.setMatrixAt(n++, tmpM); } }
       for (const Q of G.pucks) if (!Q.sunk && !Q.hold && !Q.ref) blob(Q.x, Q.y, 1.6);
       starMesh.count = n; starMesh.instanceMatrix.needsUpdate = true; blobMesh.count = bn; blobMesh.instanceMatrix.needsUpdate = true; }
-    // control ring, charge ring, aim line
-    const cs = S.ctrlSk();
-    ctrlRing.visible = !!cs && cs.ko <= 0 && !G.attract;
-    if (ctrlRing.visible) { const r = rigs.get(cs); W(cs.x, cs.y, 0.06, ctrlRing.position); if (r) { ctrlRing.position.x = r.v.x; ctrlRing.position.z = r.v.z; } ctrlRing.scale.setScalar((cs.r/(cs.baseR||2.6))*(1 + Math.sin(t*5)*0.04)); }
-    const chg = cs ? (cs.charging ? cs.charge : (cs.wind || 0)) : 0;
-    chargeRing.visible = !!cs && (cs.charging || cs.wind > 0); aimLine.visible = chargeRing.visible && P.owner === cs;
-    if (chargeRing.visible) { chargeRing.position.copy(ctrlRing.position); chargeRing.position.y = 0.07; chargeU.value = chg; }
-    if (aimLine.visible) { const a = cs.charging ? S.aimAngle(cs) : cs.windAim, len = 10 + chg*14; W(P.x, P.y, 0.08, aimLine.position); aimLine.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); aimLine.scale.set(1, 1, len); aimTex.repeat.set(1, len/2.2); }
+    // control ring, charge ring, aim line for each human player
+    humanFx.forEach((fx, p) => {
+      const cs = !G.attract && p < S.humans() ? S.humanSk(p) : null;
+      fx.ring.visible = !!cs && cs.ko <= 0;
+      if (fx.ring.visible) { const r = rigs.get(cs); W(cs.x, cs.y, 0.06, fx.ring.position); if (r) { fx.ring.position.x = r.v.x; fx.ring.position.z = r.v.z; } fx.ring.scale.setScalar((cs.r/(cs.baseR||2.6))*(1 + Math.sin(t*5 + p)*0.04)); }
+      const chg = cs ? (cs.charging ? cs.charge : (cs.wind || 0)) : 0;
+      fx.charge.visible = !!cs && (cs.charging || cs.wind > 0); fx.aim.visible = fx.charge.visible && P.owner === cs;
+      if (fx.charge.visible) { fx.charge.position.copy(fx.ring.position); fx.charge.position.y = 0.07; fx.chargeU.value = chg; }
+      if (fx.aim.visible) { const a = cs.charging ? S.aimAngle(cs) : cs.windAim, len = 10 + chg*14; W(P.x, P.y, 0.08, fx.aim.position); fx.aim.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); fx.aim.scale.set(1, 1, len); fx.aimTex.repeat.set(1, len/2.2); }
+    });
     updateCamera(G, dt);
     { const db = renderer.getDrawingBufferSize(_dbs); texelU.value.set(1/Math.max(1, db.x), 1/Math.max(1, db.y)); }
-    shakeU.value = Math.min(1.6, (G.shake || 0) + (goalT >= 0 && goalT < 0.8 ? 0.8*(1 - goalT/0.8) : 0));
+    shakeU.value = S.reducedMotion() ? 0 : Math.min(1.6, (G.shake || 0) + (goalT >= 0 && goalT < 0.8 ? 0.8*(1 - goalT/0.8) : 0));
     outlineW.value = Math.min(0.42, Math.max(0.05, cam.position.distanceTo(_ctr.set(camS.tx, camS.ty, camS.tz))*0.0021));
     post.render();
     if (checkPlan.length && !checking && performance.now() > checkPlan[0]) { checkPlan.shift(); selfCheck(); }

@@ -45,6 +45,25 @@ for (const gfx of ['classic', 'med']) {
   const msg = await page.textContent('#saveMsg');
   if (!/Loaded/.test(msg)) fail(`${gfx}: save code did not load (${msg})`);
 
+  // two-player versus on one keyboard: P2 skates with the arrow keys (classic view only: software 3D is too slow to drive)
+  if (gfx === 'classic') {
+  await page.click('#btnPractice');
+  await page.click('#p_players button[data-v="vs"]');
+  await page.click('#pracGo');
+  await page.waitForFunction(() => window.__sim.G && window.__sim.G.state === 'play', null, { timeout: 30000 });
+  const vs = await page.evaluate(() => ({ mode: window.__sim.G.mode, humans: window.__sim.humans(), p2team: window.__sim.humanSk(1) && window.__sim.humanSk(1).team }));
+  if (vs.mode !== 'vs' || vs.humans !== 2 || vs.p2team !== 'away') fail(`${gfx}: versus not set up (${JSON.stringify(vs)})`);
+  const x0 = await page.evaluate(() => window.__sim.humanSk(1).x);
+  await page.keyboard.down('ArrowLeft'); await page.waitForTimeout(600); await page.keyboard.up('ArrowLeft');
+  const x1 = await page.evaluate(() => window.__sim.humanSk(1).x);
+  if (!(x1 < x0 - 2)) fail(`${gfx}: player 2 did not move (${x0} -> ${x1})`);
+  await page.keyboard.press('KeyP');
+  await page.click('#btnQuit');
+  await page.click('#btnPractice');
+  await page.click('#p_players button[data-v="1p"]');
+  await page.click('#pracBack');
+  }
+
   if (gfx !== 'classic') {
     const r3 = await page.evaluate(() => ({ status: window.__r3d.status, active: window.__r3d.active }));
     if (!r3.active) fail(`3D view not active (${JSON.stringify(r3)})`);
