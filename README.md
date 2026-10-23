@@ -66,7 +66,7 @@ If the 3D view fails a startup check, the game steps down on its own: first lowe
 
 ## Feel tuning
 
-Press **`** (backtick) or open **Feel tuning** from the pause menu to get live sliders for skating (turn rates, hockey stops), the stick (speed, reach, puck grip), shooting and passing (wind-up, flick zone, shot speed, aim assist) and hits (knockdown threshold, knockback). The game keeps running while the panel is open, changes save in your browser, and **Copy values** puts your changes on the clipboard so they can become the new defaults in `js/game.js` (`TUNE_DEF`).
+Press **`** (backtick) or open **Feel tuning** from the pause menu to get live sliders for skating (turn rates, hockey stops), the stick (speed, reach, puck grip), shooting and passing (wind-up, flick zone, shot speed, aim assist) and hits (knockdown threshold, knockback). The game keeps running while the panel is open, changes save in your browser, and **Copy values** puts your changes on the clipboard so they can become the new defaults in `js/game.js` (`TUNE_DEF` in `js/match.js`).
 
 ## Sound
 
@@ -105,7 +105,18 @@ The test plays a few seconds of a challenge and a practice in both the classic a
 ```
 index.html            page markup and import map
 css/style.css         UI styles
-js/game.js            simulation, AI, rules, menus, input and the classic 2D view
+js/core.js            helpers, rink geometry, content (powers, challenges, teams), saves
+js/audio.js           sample loader, mixer, crowd and sound effects
+js/match.js           match state, feel tuning, accessibility, rules and practice config
+js/physics.js         skating, the stick blade, shots, passes, one-timers, dekes, goalies, pucks
+js/flow.js            instant replay and challenge objectives
+js/ai.js              computer players, power-ups and crates
+js/input.js           remappable keyboard / controller / touch input for one or two players
+js/update.js          the per-frame simulation step
+js/render2d.js        classic top-down view and scoreboard
+js/overlay.js         HUD over the 3D view, player badges, graphics settings, 3D bridge
+js/ui.js              menus, practice setup, results, pause, tuning panel
+js/main.js            main loop and start-up
 js/render3d.js        three.js broadcast renderer (WebGPU / WebGL2, TSL node materials)
 vendor/three/         three.js r180 (pinned, served locally)
 assets/               icon, social preview, screenshot, sfx/ sound pack

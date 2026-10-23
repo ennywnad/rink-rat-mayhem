@@ -1,0 +1,127 @@
+// Rink Rat Mayhem · Audio: sample pack loader, mixer, crowd bed, sound effects and synth fallback
+'use strict';
+// ---------------- audio
+// Sample pack in assets/sfx (built by tools/gen_sfx.py). Mixer: effects + crowd buses -> compressor -> master volume.
+// If a sample hasn't loaded (or fails), the old synthesised version plays instead.
+let AC = null, noise = null, master = null, sfxBus = null, crowdBus = null, crowdGain = null, crowdSrc = null;
+let volume = 0.8, crowdVol = 0.6;
+try { const v = parseFloat(localStorage.getItem('rinkrat-vol')); if (v >= 0 && v <= 1) volume = v; const c = parseFloat(localStorage.getItem('rinkrat-crowdvol')); if (c >= 0 && c <= 1) crowdVol = c; } catch(e) {}
+const SFX_SET = { stick:4, shot:3, slap:3, board:3, post:2, pad:3, check:3, skate:4, stop:2, whistle:1, horn:1, buzzer:1, boom:1, splash:1, fire:1, zap:1, thunder:1, freeze:1, grow:1, rocket:1, saw:1, pickup:1, ko:1, level:1, cheer:1, aww:1, crowd:1 };
+const SFX_GAIN = { stick:0.5, shot:0.7, slap:0.85, board:0.7, post:0.55, pad:0.6, check:0.85, skate:0.16, stop:0.32, whistle:0.42, horn:0.5, buzzer:0.45, boom:0.8, splash:0.6, fire:0.55, zap:0.5, thunder:0.75, freeze:0.5, grow:0.6, rocket:0.55, saw:0.45, pickup:0.45, ko:0.55, level:0.5, cheer:0.75, aww:0.55 };
+const SFX_GAP = { skate:0.1, stick:0.04, cheer:1.5, aww:1.5 };
+const NO_PITCH = new Set(['whistle', 'horn', 'buzzer', 'level', 'pickup', 'cheer', 'aww']);
+const sfxRaw = {}, sfxBuf = {}, sfxLast = {};
+// fetch the bytes right away; decode once the audio context exists (after the first tap / key / button)
+for (const [name, n] of Object.entries(SFX_SET)) for (let i=0;i<n;i++) {
+  const key = `${name}_${i}`;
+  sfxRaw[key] = fetch(`assets/sfx/${key}.mp3`).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null);
+}
+let sfxDecoding = false;
+function decodeSfx(){
+  if (sfxDecoding || !AC) return; sfxDecoding = true;
+  for (const [name, n] of Object.entries(SFX_SET)) for (let i=0;i<n;i++) {
+    sfxRaw[`${name}_${i}`].then(ab => ab && new Promise((res, rej) => AC.decodeAudioData(ab, res, rej))).then(buf => {
+      if (!buf) return; (sfxBuf[name] || (sfxBuf[name] = [])).push(buf);
+      if (name === 'crowd') startCrowd();
+    }).catch(() => {});
+  }
+}
+function ensureAudio(){
+  if (!AC) {
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { AC = null; }
+    if (AC) {
+      const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.25;
+      master = AC.createGain(); master.gain.value = muted ? 0 : volume;
+      sfxBus = AC.createGain(); crowdBus = AC.createGain(); crowdBus.gain.value = crowdVol;
+      sfxBus.connect(comp); crowdBus.connect(comp); comp.connect(master); master.connect(AC.destination);
+      decodeSfx();
+    }
+  }
+  if (AC && AC.state === 'suspended') AC.resume().catch(()=>{});
+  if (AC && !noise) { noise = AC.createBuffer(1, AC.sampleRate, AC.sampleRate); const d = noise.getChannelData(0); for (let i=0;i<d.length;i++) d[i] = Math.random()*2-1; }
+}
+function applyA11y(){
+  app.dataset.btn = A11Y.btn; document.body.classList.toggle('rm', !!A11Y.rm);
+  JR = A11Y.btn === 'xl' ? 66 : A11Y.btn === 'large' ? 56 : 46;
+}
+function applyVolume(){
+  if (!AC) return; const t = AC.currentTime;
+  master.gain.setTargetAtTime(muted ? 0 : volume, t, 0.03); crowdBus.gain.setTargetAtTime(crowdVol, t, 0.05);
+}
+function startCrowd(){
+  if (crowdSrc || !sfxBuf.crowd) return;
+  crowdSrc = AC.createBufferSource(); crowdSrc.buffer = sfxBuf.crowd[0]; crowdSrc.loop = true;
+  crowdGain = AC.createGain(); crowdGain.gain.value = 0; crowdSrc.connect(crowdGain); crowdGain.connect(crowdBus); crowdSrc.start();
+}
+// crowd murmur swells when the puck is near a net and dips when the game is paused
+function updateCrowd(){
+  if (!crowdGain) return;
+  let target = 0.12;
+  if (G && !G.attract) {
+    if (paused || G.state === 'end') target = 0.06;
+    else { const P = G.pucks[0], dn = Math.min(Math.abs(P.y - GT), Math.abs(P.y - GB)); target = 0.24 + 0.4*clamp(1 - dn/45, 0, 1) + (G.goalLight ? 0.25 : 0); }
+  }
+  crowdGain.gain.setTargetAtTime(target, AC.currentTime, 0.5);
+}
+function playSample(name, gain, rate){
+  const list = sfxBuf[name]; if (!list || !list.length) return false;
+  let i = Math.floor(Math.random()*list.length); if (list.length > 1 && i === sfxLast[name]) i = (i + 1) % list.length; sfxLast[name] = i;
+  const src = AC.createBufferSource(); src.buffer = list[i]; src.playbackRate.value = rate;
+  const g = AC.createGain(); g.gain.value = gain; src.connect(g); g.connect(sfxBus); src.start();
+  return true;
+}
+const lastSfx = {};
+function sfx(type, v=1){
+  if (!AC || muted || (G && (G.attract || G.replay))) return;
+  const t = AC.currentTime;
+  if (lastSfx[type] && t - lastSfx[type] < (SFX_GAP[type] || 0.05)) return; lastSfx[type] = t;
+  let name = type, g = 1;
+  if (type === 'shot') { name = v > 0.62 ? 'slap' : 'shot'; g = 0.75 + 0.35*Math.min(1, v); }
+  else if (type === 'board') g = clamp(v/40, 0.25, 1.1);
+  else if (type === 'pad' || type === 'stick' || type === 'skate' || type === 'stop') g = clamp(v, 0.3, 1.1);
+  if (playSample(name, (SFX_GAIN[name] || 0.5)*g, NO_PITCH.has(name) ? 1 : 0.95 + Math.random()*0.1)) return;
+  synthSfx(type, v);
+}
+function synthSfx(type, v){
+  const t = AC.currentTime, out = sfxBus;
+  const burst = (dur, ft, freq, q, gain, f2) => {
+    gain = Math.max(0.002, gain || 0);
+    const s = AC.createBufferSource(); s.buffer = noise;
+    const f = AC.createBiquadFilter(); f.type = ft; f.frequency.setValueAtTime(freq, t); if (f2) f.frequency.exponentialRampToValueAtTime(f2, t+dur); f.Q.value = q;
+    const g = AC.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+    s.connect(f); f.connect(g); g.connect(out); s.start(t, Math.random()*0.5); s.stop(t+dur+0.02);
+  };
+  const tone = (w, fr, dur, gain, att=0.005, fd, at=0) => {
+    gain = Math.max(0.0002, gain || 0);
+    const o = AC.createOscillator(); o.type = w; o.frequency.setValueAtTime(fr, t+at); if (fd) o.frequency.exponentialRampToValueAtTime(fd, t+at+dur);
+    const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t+at); g.gain.exponentialRampToValueAtTime(gain, t+at+att); g.gain.exponentialRampToValueAtTime(0.0001, t+at+dur);
+    o.connect(g); g.connect(out); o.start(t+at); o.stop(t+at+dur+0.05); return o;
+  };
+  switch(type){
+    case 'shot': burst(0.07,'bandpass',2600,0.9,0.35+0.35*v); tone('triangle',180,0.06,0.12*v); break;
+    case 'stick': burst(0.035,'bandpass',1900,1.4,0.18*v); break;
+    case 'board': burst(0.18,'lowpass',260,0.7,Math.min(0.7,v/50)); break;
+    case 'post': tone('sine',1320,0.6,0.22); tone('sine',2710,0.35,0.08); break;
+    case 'pad': burst(0.09,'lowpass',650,0.8,0.32*v); break;
+    case 'check': burst(0.22,'lowpass',200,0.6,0.7); tone('sine',90,0.2,0.3,0.005,40); break;
+    case 'boom': burst(0.8,'lowpass',900,0.5,0.9,60); tone('sine',70,0.6,0.5,0.005,28); break;
+    case 'splash': burst(0.5,'bandpass',1400,0.6,0.5,300); break;
+    case 'fire': burst(0.6,'bandpass',700,0.5,0.4,2400); break;
+    case 'zap': tone('sawtooth',1200,0.25,0.08,0.005,180); tone('square',600,0.2,0.05,0.005,90); break;
+    case 'thunder': burst(1.1,'lowpass',2000,0.4,0.8,80); tone('sawtooth',90,0.5,0.15,0.005,40); break;
+    case 'freeze': tone('sine',2400,0.6,0.08,0.01,600); tone('triangle',1800,0.8,0.06,0.02,3000); break;
+    case 'grow': tone('sawtooth',80,0.8,0.12,0.02,220); break;
+    case 'rocket': burst(0.9,'highpass',1800,0.5,0.25,4000); break;
+    case 'pickup': tone('square',660,0.08,0.06); tone('square',990,0.12,0.06,0.005,null,0.08); break;
+    case 'ko': tone('triangle',520,0.5,0.15,0.005,90); burst(0.3,'bandpass',900,1,0.35); break;
+    case 'saw': tone('sawtooth',300,0.3,0.06,0.005,900); break;
+    case 'whistle': { const o = tone('sine',2850,0.42,0.09,0.02); const l = AC.createOscillator(); l.frequency.value = 32; const lg = AC.createGain(); lg.gain.value = 90; l.connect(lg); lg.connect(o.frequency); l.start(t); l.stop(t+0.45); break; }
+    case 'horn': {
+      const f = AC.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1100;
+      const g = AC.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.16,t+0.06); g.gain.setValueAtTime(0.16,t+1.7); g.gain.exponentialRampToValueAtTime(0.0001,t+2.1);
+      f.connect(g); g.connect(out); [138,174,207].forEach(fr => { const o = AC.createOscillator(); o.type='sawtooth'; o.frequency.value=fr; o.connect(f); o.start(t); o.stop(t+2.2); }); break;
+    }
+    case 'buzzer': tone('square',196,1.0,0.08,0.01); tone('square',198.5,1.0,0.06,0.01); break;
+    case 'level': [523,659,784,1047].forEach((f,i) => tone('square',f,0.18,0.07,0.005,null,i*0.09)); break;
+  }
+}
