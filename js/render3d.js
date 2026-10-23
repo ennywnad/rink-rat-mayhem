@@ -1338,6 +1338,7 @@ async function init(){
   let orbitA = 0, goalT = -1, goalTeam = null, aspect = 1;
   function spring(cur, vel, target, k, dt){ const c = 2*Math.sqrt(k); const a = k*(target - cur) - c*vel; vel += a*dt; return [cur + vel*dt, vel]; }
   const _cf = new THREE.Vector3(), _cr = new THREE.Vector3();
+  let camCut = false;
   function updateCamera(G, dt){
     const P = G.pucks[0];
     let tx, ty = 0, tz, px, py, pz;
@@ -1365,6 +1366,12 @@ async function init(){
       tx = Math.max(-14, Math.min(14, focusX*0.3)) - 4; tz = Math.max(-58, Math.min(58, focusZ + P.vy*0.15));
       px = tx + d*Math.cos(pitch); py = d*Math.sin(pitch); pz = tz;
     }
+    // instant replay: a low camera by the net that scored, following the puck
+    const rv = S.replayView && S.replayView();
+    if (rv && !G.attract) {
+      const gz = (rv.team === 'home' ? GT : GB) - RL/2, dir = rv.team === 'home' ? 1 : -1, side = rv.x >= CX ? 1 : -1;
+      px = side*26; py = 7.5; pz = gz + dir*24; tx = (rv.x - CX)*0.7; ty = 2.2; tz = (rv.y - RL/2)*0.75 + gz*0.25; cam.fov = 44; goalT = -1;
+    }
     if (goalT >= 0) {
       goalT += dt; const f = goalT < 0.4 ? goalT/0.4 : goalT < 1.9 ? 1 : Math.max(0, 1 - (goalT - 1.9)/0.8);
       const ez = goalTeam === 'home' ? GT - RL/2 : GB - RL/2, e = f*f*(3 - 2*f);
@@ -1372,7 +1379,8 @@ async function init(){
       px += (tx - px)*0.38*e; py += (ty - py)*0.38*e + 0; pz += (tz - pz)*0.38*e;
       if (goalT > 2.8) goalT = -1;
     }
-    const kk = G.attract ? 6 : 26;
+    const kk = G.attract ? 6 : rv ? 14 : 26;
+    if (camCut) { camCut = false; Object.assign(camS, { tx, ty, tz, px, py, pz, wx:0, wy:0, wz:0, vx:0, vy:0, vz:0 }); }
     [camS.tx, camS.wx] = spring(camS.tx, camS.wx, tx, kk, dt); [camS.ty, camS.wy] = spring(camS.ty, camS.wy, ty, kk, dt); [camS.tz, camS.wz] = spring(camS.tz, camS.wz, tz, kk, dt);
     [camS.px, camS.vx] = spring(camS.px, camS.vx, px, kk, dt); [camS.py, camS.vy] = spring(camS.py, camS.vy, py, kk, dt); [camS.pz, camS.vz] = spring(camS.pz, camS.vz, pz, kk, dt);
     const sh = (G.shake || 0)*0.7;
@@ -1566,6 +1574,12 @@ async function init(){
       if (fx.charge.visible) { fx.charge.position.copy(fx.ring.position); fx.charge.position.y = 0.07; fx.chargeU.value = chg; }
       if (fx.aim.visible) { const a = cs.charging ? S.aimAngle(cs) : cs.windAim, len = 10 + chg*14; W(P.x, P.y, 0.08, fx.aim.position); fx.aim.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); fx.aim.scale.set(1, 1, len); fx.aimTex.repeat.set(1, len/2.2); }
     });
+    if (R3.cut) {   // replay start/end: snap everything instead of gliding
+      R3.cut = false; camCut = true;
+      for (const r of rigs.values()) { r.v.init = false; r.v.ox = r.v.oz = 0; }
+      if (goalieRigs) for (const r of Object.values(goalieRigs)) { r.v.init = false; r.v.ox = r.v.oz = 0; }
+      pucks.forEach(m => { m.userData.init = false; m.userData.hist = []; });
+    }
     updateCamera(G, dt);
     { const db = renderer.getDrawingBufferSize(_dbs); texelU.value.set(1/Math.max(1, db.x), 1/Math.max(1, db.y)); }
     shakeU.value = S.reducedMotion() ? 0 : Math.min(1.6, (G.shake || 0) + (goalT >= 0 && goalT < 0.8 ? 0.8*(1 - goalT/0.8) : 0));

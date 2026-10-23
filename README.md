@@ -14,6 +14,7 @@ A 3-on-3 mutant hockey brawler that runs in your browser. Lead the Rink Rats thr
 - **One-timers and dekes:** press shoot while a pass is on its way to fire it straight off the pass. The deke button does a toe drag toward wherever the right stick points, or a between-the-legs move with the stick centred; defenders in front get fooled for a moment.
 - **Two players on one screen:** co-op (both on the Rats, in practice or any challenge) or versus (P1 Rats vs P2, in practice). Play with two controllers, a keyboard and a controller, or both on one keyboard.
 - **Power-up badges:** an icon over whoever holds the team's power-up, and a timer ring around players with an active effect.
+- **Instant replays:** after each goal, the last few seconds replay with a slow-motion moment at the goal and a low camera by the net. Shoot or pass to skip; turn them off under Accessibility.
 - **Practice rink:** choose 0–3 opponents, 0–2 teammates, the goalies, the opponents' effort and the clock. Drill opponents carry the puck, lob it up ice, then back off or loop behind their net.
 - **Rules and sliders:** turn icing, faceoffs after goals, checking, knockouts, hazards and power-ups on or off. Tune speed, acceleration, shot power, checking, puck control and goalie for each team from 50% to 150%. These work in practice and in the regular challenges.
 - **Live stoppages:** players skate to the faceoff dot after goals and icings instead of teleporting, and coasting skaters sometimes lift a skate.

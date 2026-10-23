@@ -130,7 +130,7 @@ try { const s = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (s && typeo
 let muted = false;
 try { muted = localStorage.getItem('rinkrat-mute') === '1'; } catch(e) {}
 let dbDoc = null, dbChain = Promise.resolve();
-const GAME_VERSION = 'v1.4.0';
+const GAME_VERSION = 'v1.5.0';
 // save codes: "RRM1." + base64url(JSON)
 function exportSave(){ const j = JSON.stringify({ ...save, updatedAt:Date.now() }); return 'RRM1.' + btoa(unescape(encodeURIComponent(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function importSave(code){
@@ -240,7 +240,7 @@ function playSample(name, gain, rate){
 }
 const lastSfx = {};
 function sfx(type, v=1){
-  if (!AC || muted || (G && G.attract)) return;
+  if (!AC || muted || (G && (G.attract || G.replay))) return;
   const t = AC.currentTime;
   if (lastSfx[type] && t - lastSfx[type] < (SFX_GAP[type] || 0.05)) return; lastSfx[type] = t;
   let name = type, g = 1;
@@ -253,12 +253,14 @@ function sfx(type, v=1){
 function synthSfx(type, v){
   const t = AC.currentTime, out = sfxBus;
   const burst = (dur, ft, freq, q, gain, f2) => {
+    gain = Math.max(0.002, gain || 0);
     const s = AC.createBufferSource(); s.buffer = noise;
     const f = AC.createBiquadFilter(); f.type = ft; f.frequency.setValueAtTime(freq, t); if (f2) f.frequency.exponentialRampToValueAtTime(f2, t+dur); f.Q.value = q;
     const g = AC.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
     s.connect(f); f.connect(g); g.connect(out); s.start(t, Math.random()*0.5); s.stop(t+dur+0.02);
   };
   const tone = (w, fr, dur, gain, att=0.005, fd, at=0) => {
+    gain = Math.max(0.0002, gain || 0);
     const o = AC.createOscillator(); o.type = w; o.frequency.setValueAtTime(fr, t+at); if (fd) o.frequency.exponentialRampToValueAtTime(fd, t+at+dur);
     const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t+at); g.gain.exponentialRampToValueAtTime(gain, t+at+att); g.gain.exponentialRampToValueAtTime(0.0001, t+at+dur);
     o.connect(g); g.connect(out); o.start(t+at); o.stop(t+at+dur+0.05); return o;
@@ -469,11 +471,10 @@ function finishRegroup(){
   for (const s of G.sk) {
     if (!s.foT) continue;
     if (s.ko > 0) { s.ko = 0; s.hp = 100; s.stun = 0; s.x = s.foT[0]; s.y = s.foT[1]; }
-    if (s.ko <= 0 && hyp(s.x - s.foT[0], s.y - s.foT[1]) > 2.4) { s.x = s.foT[0]; s.y = s.foT[1]; }
-    s.vx *= 0.2; s.vy *= 0.2; s.face = s.team === 'home' ? -Math.PI/2 : Math.PI/2; s.foT = null;
+    if (s.ko <= 0 && hyp(s.x - s.foT[0], s.y - s.foT[1]) > 8) { s.x = s.foT[0]; s.y = s.foT[1]; s.vx *= 0.2; s.vy *= 0.2; }   // only true stragglers get placed
   }
-  Object.assign(P, { ref:false, x:spot.x, y:spot.y, vx:0, vy:0 });
-  G.state = 'faceoff'; G.stT = 0.8; G.awayWait = 0.45 - G.tier*0.03;
+  Object.assign(P, { ref:false, x:spot.x, y:spot.y, vx:0, vy:0 }); G.foPuck = { x:spot.x, y:spot.y };
+  G.state = 'faceoff'; G.stT = 0.9; G.awayWait = 0.45 - G.tier*0.03;
   assignHumans(spot);
 }
 function regroupInput(s){
@@ -481,7 +482,7 @@ function regroupInput(s){
   { const hp = humanOf(s); if (hp >= 0) { const v = readInput(hp); if (hyp(v[0], v[1]) > 0.25) return v; } }
   const [tx, ty] = s.foT, d = hyp(tx - s.x, ty - s.y);
   if (d < 1.6) { s.face = turn(s.face, s.team === 'home' ? -Math.PI/2 : Math.PI/2, 0.12); return [0,0]; }
-  const v = moveTo(s, tx, ty), k = d > 30 ? 0.85 : d > 10 ? 0.66 : 0.5;
+  const v = moveTo(s, tx, ty), k = d > 30 ? 1 : d > 10 ? 0.82 : 0.6;
   return [v[0]*k, v[1]*k];
 }
 function setFaceoff(){
@@ -645,6 +646,7 @@ function bladeTarget(s){
   if (s.relT > 0) { a = 0.05; r = s.r + 1.9; }
   if (s.lunge > 0) { a *= 0.4; r += 1.9; }
   if (s.stun > 0 || s.frozen > 0) { a = 0.9; r = s.r + 1.2; }
+  if (!isFinite(a)) a = 0.12; if (!isFinite(r)) r = s.r + 1.7;   // never let a bad target poison the blade
   return [clamp(a, -BLADE_MAX, BLADE_MAX), r];
 }
 function updBlade(s, h){
@@ -1127,6 +1129,54 @@ function toast(main, sub, ms, cls){
   t.className = 'toast' + (cls ? ' ' + cls : ''); t.hidden = true; void t.offsetWidth; t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
+// ---------------- instant replay: a rolling recording of the last few seconds, played back after a goal
+const REC_SK = ['x','y','vx','vy','face','stun','down','ko','charging','charge','lunge','rocket','kaiju','magnet','frozen','check','wind','swing','swingA','relT','r','hp'];
+const REC_G = ['x','y','face','save','saveLat','saveHigh','stun','frozen','shrink','r','hold'];
+const REC_P = ['x','y','vx','vy','sunk','fire','homing','shotBy','ref'];
+let replayOn = true;
+try { replayOn = localStorage.getItem('rinkrat-replays') !== '0'; } catch(e) {}
+function snapState(){
+  const P = G.pucks[0];
+  return { t:G.time,
+    sk: G.sk.map(s => [REC_SK.map(k => s[k]), s.bl ? [s.bl.a, s.bl.r, s.bl.x, s.bl.y] : null]),
+    g: [G.gH, G.gA].map(g => REC_G.map(k => g[k])),
+    p: [REC_P.map(k => P[k]), P.owner ? G.sk.indexOf(P.owner) : -1, P.hold === G.gH ? 0 : P.hold === G.gA ? 1 : -1] };
+}
+function applyState(f){
+  f.sk.forEach(([vals, bl], i) => { const s = G.sk[i]; if (!s) return; REC_SK.forEach((k, j) => { s[k] = vals[j]; }); if (bl && s.bl) { [s.bl.a, s.bl.r, s.bl.x, s.bl.y] = bl; s.bl.va = s.bl.vr = 0; } });
+  [G.gH, G.gA].forEach((g, i) => REC_G.forEach((k, j) => { g[k] = f.g[i][j]; }));
+  const P = G.pucks[0]; REC_P.forEach((k, j) => { P[k] = f.p[0][j]; });
+  P.owner = f.p[1] >= 0 ? G.sk[f.p[1]] : null; P.hold = f.p[2] === 0 ? G.gH : f.p[2] === 1 ? G.gA : null;
+  P.trail.length = 0;
+}
+function recordFrame(){
+  if (!G || G.attract || G.replay) return;
+  const rec = G.rec || (G.rec = []);
+  rec.push(snapState());
+  while (rec.length && G.time - rec[0].t > 2.9) rec.shift();
+}
+function startReplay(){
+  const rec = G.rec || []; if (rec.length < 30) return;
+  const t1 = rec[rec.length - 1].t, goalAt = G.goalAt || t1;
+  G.replay = { frames: rec.slice(), t: rec[0].t, t0: rec[0].t, t1, goalAt, live: snapState(), team: G.goalLight ? G.goalLight.team : 'home' };
+  G.rec = [];
+  if (window.__r3d) window.__r3d.cut = true;
+}
+function endReplay(){
+  if (!G || !G.replay) return;
+  applyState(G.replay.live); G.replay = null;
+  G.stT = Math.min(G.stT, 0.4);
+  if (window.__r3d) window.__r3d.cut = true;
+}
+// playback: real time, easing into slow motion around the goal
+function stepReplay(dt){
+  const R = G.replay, slow = Math.abs(R.t - R.goalAt) < 0.4 ? 0.45 : 1;
+  R.t += dt*slow;
+  if (R.t >= R.t1) { endReplay(); return; }
+  const fr = R.frames; let i = 0; while (i < fr.length - 1 && fr[i + 1].t <= R.t) i++;
+  applyState(fr[i]);
+}
+const replayView = () => G && G.replay ? { team:G.replay.team, x:G.pucks[0].x, y:G.pucks[0].y } : null;
 const rumbleTeam = (tm, a, b, ms) => { for (let p = 0; p < humans(); p++) if (humanTeam(p) === tm) rumble(a, b, ms, p); };
 function scoreGoal(tm, P){
   if (P.owner) { const o = P.owner; P.owner = null; o.charging = false; }
@@ -1145,7 +1195,7 @@ function scoreGoal(tm, P){
     else { toast(G.ch.opp.abbr + ' score', 'Play on', 1300, 'small bad'); sfx('whistle'); sfx('aww'); }
     return;
   }
-  G.state = 'goal'; G.stT = 3; G.goalLight = { team:tm, t:0 };
+  G.state = 'goal'; G.stT = 3; G.goalLight = { team:tm, t:0 }; G.goalAt = G.time; G.replayed = false;
   const gy = tm === 'home' ? GT : GB;
   burst(CX, gy, 40, ['#ffb51e','#ec3b4f','#ffffff'], 30, 0.8, 1.2); shake(1.6);
   if (tm === 'home') { rumbleTeam('home', 0.7, 1, 450); toast('GOAL', powered ? 'Power-up goal' : `${G.score.home}–${G.score.away}`, 2700, 'goal'); sfx('horn'); sfx('cheer'); }
@@ -1550,6 +1600,7 @@ const teamHasHuman = tm => !!G && !G.attract && (tm === 'home' || (G.mode === 'v
 function setHuman(p, s){ if (!s) return; const i = G.sk.indexOf(s); if (p === 0) G.ctrl = i; else G.ctrl2 = i; }
 const playing = () => G && !G.attract && !paused && (G.state === 'play' || G.state === 'faceoff' || G.state === 'goal' || G.state === 'reset' || G.state === 'regroup');
 function pressShoot(p = 0){
+  if (G && G.replay) { endReplay(); return; }
   if (!playing() || G.state !== 'play') return;
   const s = humanSk(p); if (!s || s.ko > 0) return;
   const P = G.pucks[0];
@@ -1562,6 +1613,7 @@ function releaseShoot(p = 0){
   if (s.charging) { if (G.pucks[0].owner === s) shoot(s, s.charge, skillAim(s)); s.charging = false; }
 }
 function pressPass(p = 0){
+  if (G && G.replay) { endReplay(); return; }
   if (!playing() || G.state !== 'play') return;
   const s = humanSk(p); if (!s) return;
   if (G.pucks[0].owner === s) { const [ix, iy] = readInput(p); passPuck(s, (ix||iy) ? Math.atan2(iy, ix) : null); }
@@ -1821,9 +1873,11 @@ function update(dt){
   for (let i=G.pucks.length-1;i>0;i--){ const b = G.pucks[i]; b.life -= dt; if (b.life <= 0) { burst(b.x, b.y, 6, ['#ffffff','#7ef0ff'], 8, 0.4, 0.4); G.pucks.splice(i,1); } }
 
   if (G.state === 'end') return;
-  if (G.state === 'faceoff') { G.stT -= dt; if (G.stT <= 0) { G.state = 'play'; const P = G.pucks[0]; P.vx = rand(-3,3); P.vy = rand(-1,1); sfx('whistle'); } return; }
+  if (G.state === 'faceoff') { G.stT -= dt; if (G.stT <= 0) { G.state = 'play'; for (const s of G.sk) s.foT = null; const P = G.pucks[0]; P.vx = rand(-3,3); P.vy = rand(-1,1); sfx('whistle'); } else if (!G.sk.some(s => s.foT)) return; }
+  if (G.replay) { stepReplay(dt); return; }
+  if (G.state === 'goal' && !G.replayed && replayOn && !G.attract && G.stT <= 2.45) { G.replayed = true; startReplay(); if (G.replay) return; }
   if (G.state === 'goal' || G.state === 'reset') { G.stT -= dt; if (G.stT <= 0) { startRegroup({ x:CX, y:100 }); return; } }
-  if (G.state === 'regroup') { G.regT += dt; if (G.regT > 0.6) { const pending = G.sk.some(s => s.ko <= 0 && s.foT && hyp(s.x - s.foT[0], s.y - s.foT[1]) > 3); if (!pending || G.regT > 7) { finishRegroup(); return; } } }
+  if (G.state === 'regroup') { G.regT += dt; if (G.regT > 0.6) { const pending = G.sk.some(s => s.ko <= 0 && s.foT && hyp(s.x - s.foT[0], s.y - s.foT[1]) > 6); if (!pending || G.regT > 4.5) { finishRegroup(); return; } } }
   if (G.goalLight && G.state === 'play' && G.goalLight.t > 2.6) G.goalLight = null;
   if (G.state === 'play') {
     if (G.ch.len > 0) { G.clock -= dt; if (G.clock <= 0) { G.clock = 0; endMatch(); return; } }
@@ -1863,14 +1917,14 @@ function update(dt){
     if (hs.charging) hs.charge = Math.min(1, hs.charge + dt/TUNE.chargeTime);
     if (G.pucks[0].owner !== hs && !(hs.ot > 0)) hs.charging = false; }
   { const P = G.pucks[0], o = P.owner;   // AI puck carriers deke when a defender closes in front of them
-    if (o && !isHuman(o) && (o.dk || 0) <= 0 && G.state === 'play') for (const d of G.sk) { if (d.team === o.team || d.ko > 0) continue; const dx = d.x - o.x, dy = d.y - o.y, dd = hyp(dx, dy); if (dd < 9 && Math.abs(angDiff(Math.atan2(dy, dx), o.face)) < 0.9 && Math.random() < dt*2.2) { if (Math.random() < 0.45 && startDeke(o, Math.random() < 0.5 ? null : [Math.cos(o.face + (o.dkA > 0 ? 1.2 : -1.2)), Math.sin(o.face + (o.dkA > 0 ? 1.2 : -1.2))])) { o.dk = 1.2; break; } o.dk = rand(0.3, 0.45); o.dkA = (o.dkA || 1) > 0 ? -1.15 : 1.15; break; } } }
+    if (o && !isHuman(o) && (o.dk || 0) <= 0 && G.state === 'play') for (const d of G.sk) { if (d.team === o.team || d.ko > 0) continue; const dx = d.x - o.x, dy = d.y - o.y, dd = hyp(dx, dy); if (dd < 9 && Math.abs(angDiff(Math.atan2(dy, dx), o.face)) < 0.9 && Math.random() < dt*2.2) { if (!(o.dekeCd > 0) && Math.random() < 0.45 && startDeke(o, Math.random() < 0.5 ? null : [Math.cos(o.face + (o.dkA > 0 ? 1.2 : -1.2)), Math.sin(o.face + (o.dkA > 0 ? 1.2 : -1.2))])) break; o.dk = rand(0.3, 0.45); o.dkA = (o.dkA || 1) > 0 ? -1.15 : 1.15; break; } } }
   if (cs && !G.attract && cs.ko <= 0 && cs.stun <= 0 && cs.frozen <= 0) {   // stride sounds
     const csp = hyp(cs.vx, cs.vy), [ix, iy] = readInput();
     cs.strideT = (cs.strideT || 0) - dt;
     if (csp > 9 && (ix || iy) && !cs.braking && cs.strideT <= 0) { sfx('skate', 0.55 + csp/50); cs.strideT = 0.44 - Math.min(0.2, csp/130); }
   }
   const P0 = G.pucks[0]; if (P0.passTo) { P0.passT -= dt; if (P0.passT <= 0 || P0.owner) P0.passTo = null; }
-  const inputs = G.sk.map(s => { const hp = humanOf(s); return G.state === 'regroup' ? regroupInput(s) : (hp >= 0 && G.state === 'play') ? readInput(hp) : (G.state === 'play' ? aiSkater(s, dt) : [0,0]); });
+  const inputs = G.sk.map(s => { const hp = humanOf(s); return (G.state === 'regroup' || G.state === 'faceoff') ? regroupInput(s) : (hp >= 0 && G.state === 'play') ? readInput(hp) : (G.state === 'play' ? aiSkater(s, dt) : [0,0]); });
   const sub = 3, h = dt/sub;
   for (let i=0;i<sub;i++){
     for (let k=0;k<G.sk.length;k++){ updSkater(G.sk[k], inputs[k][0], inputs[k][1], h); updBlade(G.sk[k], h); }
@@ -1883,7 +1937,9 @@ function update(dt){
     if (G.state === 'reset' || G.state === 'end') break;
   }
   if (G.state === 'play') steals(dt);
+  if (G.state === 'faceoff' && G.foPuck) { const P = G.pucks[0]; P.x = G.foPuck.x; P.y = G.foPuck.y; P.vx = P.vy = 0; P.owner = null; }   // puck sits on the dot while stragglers settle
   for (const P of G.pucks) { const sp = hyp(P.vx, P.vy); P.trail.push([P.x, P.y, sp]); if (P.trail.length > 9) P.trail.shift(); }
+  if (G.state === 'play' || G.state === 'goal') recordFrame();
 }
 
 // ---------------- rendering
@@ -2201,6 +2257,7 @@ function render(now){
   }
   ctx.globalAlpha = 1;
   drawBadges((x, y) => { const [sx, sy] = W2S(x, y - 5.2); return [sx, sy, sy > -20 && sy < ch + 20]; }, t);
+  drawReplayBanner(t);
   for (let p = 0; p < humans(); p++) { const hs = humanSk(p); if (!hs || hs.ko > 0 || G.attract) continue;
     const [sx, sy] = W2S(hs.x, hs.y);
     if (sy < 8 || sy > ch - 8) { const ey = sy < 8 ? 14 : ch - 14, d = sy < 8 ? -1 : 1; ctx.fillStyle = HUMAN_COL[p]; ctx.beginPath(); ctx.moveTo(sx, ey + d*8); ctx.lineTo(sx - 9, ey - d*4); ctx.lineTo(sx + 9, ey - d*4); ctx.closePath(); ctx.fill(); }
@@ -2314,6 +2371,7 @@ function renderOverlay3D(R3){
   for (const p of G.pops) { const [sx, sy, ok] = R3.project(p.x, p.y, 7.5); if (ok) comicPop(p, sx, sy); }
   ctx.globalAlpha = 1;
   drawBadges((x, y, h) => R3.project(x, y, h), performance.now()/1000);
+  drawReplayBanner(performance.now()/1000);
   for (let p = 0; p < humans(); p++) { const cs = humanSk(p); if (!cs || cs.ko > 0 || G.attract) continue;
     const [sx, sy] = R3.project(cs.x, cs.y, 0);
     if (sy < 8 || sy > ch - 8 || sx < 4 || sx > cw - 4) { const ex = clamp(sx, 16, cw - 16), ey = clamp(sy, 16, ch - 16), a = Math.atan2(sy - ey, sx - ex); ctx.save(); ctx.translate(ex, ey); ctx.rotate(a); ctx.fillStyle = HUMAN_COL[p]; ctx.strokeStyle = '#150e1c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-7, -9); ctx.lineTo(-7, 9); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore(); }
@@ -2373,6 +2431,19 @@ function drawBadgeRow(list, sx, sy, t){
   ctx.restore();
 }
 // proj(x, y, heightFt) -> [sx, sy, onScreen]
+function drawReplayBanner(t){
+  if (!G || !G.replay) return;
+  const bar = Math.round(ch*0.07);
+  ctx.save(); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle = 'rgba(8,5,12,.88)'; ctx.fillRect(0, 0, cw, bar); ctx.fillRect(0, ch - bar, cw, bar);
+  ctx.font = '20px Bungee, "Arial Black", Impact, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const blink = A11Y.rm || Math.floor(t*2) % 2 === 0;
+  if (blink) { ctx.fillStyle = '#ec3b4f'; ctx.beginPath(); ctx.arc(22, bar/2, 6, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#f4ecd8'; ctx.fillText('REPLAY', 36, bar/2 + 1);
+  ctx.font = '600 13px "Saira Semi Condensed", sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(244,236,216,.75)';
+  ctx.fillText(matchMedia('(pointer:coarse)').matches ? 'Tap Shoot to skip' : 'Shoot or pass to skip', cw - 16, bar/2 + 1);
+  ctx.restore();
+}
 function drawBadges(proj, t){
   if (!G || G.attract) return;
   for (const s of G.sk) {
@@ -2407,7 +2478,7 @@ function setGfx(p){
   refreshGfx();
 }
 window.__sim = {
-  humanSk, humans, humanOf, reducedMotion: () => !!A11Y.rm,
+  replayView, humanSk, humans, humanOf, reducedMotion: () => !!A11Y.rm,
   audio: () => ({ ctx: AC ? AC.state : null, loaded: Object.values(sfxBuf).reduce((n, l) => n + l.length, 0), crowd: !!crowdSrc, muted, volume, crowdVol }),
   get G(){ return G; }, ctrlSk, stickPt, aimAngle, HOME, SPECIES,
   C:{ RW, RL, CR, CX, GT, GB, PL, PRt, ND, PUCK_R, SK_R, G_R },
@@ -2416,6 +2487,11 @@ window.__sim = {
   notice: m => { if (G && !G.attract) toast('3D view', m, 2600, 'small'); },
   forceClassic: m => { gfxPref = 'classic'; $('gl').hidden = true; refreshGfx(); if (G && !G.attract) toast('Classic view', m, 3200, 'small'); }
 };
+// test-only hooks (?debug): fast-forward the simulation and drive the keyboard
+if (/[?&]debug\b/.test(location.search)) Object.assign(window.__sim, {
+  step(n, dt = 1/60, each){ for (let i = 0; i < n; i++) { if (each) each(i); update(dt); } },
+  keys, startChallenge: (i, mode) => { chMode = mode || '1p'; startChallenge(i); }, startPractice: cfg => { Object.assign(practice, cfg || {}); startPractice(); },
+});
 function gfxEngine(){ try { return localStorage.getItem('rinkrat-gfx-engine') || 'webgpu'; } catch(e) { return 'webgpu'; } }
 function setEngine(e){
   try { localStorage.setItem('rinkrat-gfx-engine', e); } catch(err) {}
@@ -2485,6 +2561,7 @@ function renderHub(){
     <div class="card gfx"><h3 class="h">Accessibility</h3>
       <label class="tog"><input type="checkbox" id="a_cb" ${A11Y.cb ? 'checked' : ''}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Color-blind friendly teams</b><small>Rats in amber and black, every opponent in blue and white; health bars go blue to magenta</small></span></label>
       <label class="tog"><input type="checkbox" id="a_rm" ${A11Y.rm ? 'checked' : ''}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Reduce motion</b><small>No screen shake, goal-light flashing, speed lines or pulsing buttons</small></span></label>
+      <label class="tog"><input type="checkbox" id="a_rp" ${replayOn ? 'checked' : ''}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Goal replays</b><small>A slow-motion replay after each goal; shoot or pass to skip it</small></span></label>
       <div class="prow"><span class="xptext">On-screen buttons</span>${segHtml('a_btn', [['normal','Normal'],['large','Large'],['xl','Extra large']], A11Y.btn)}</div></div>
     <div class="card gfx"><h3 class="h">Graphics</h3><div class="seg" id="gfxSeg">${GFX_OPTS.map(([k,l]) => `<button type="button" data-g="${k}" aria-pressed="${k===gfxPref}">${l}</button>`).join('')}</div><h3 class="h" style="margin-top:6px">3D engine</h3><div class="seg" id="engSeg">${[['webgpu','WebGPU'],['webgl','WebGL2 (compatibility)']].map(([k,l]) => `<button type="button" data-e="${k}" aria-pressed="${k===gfxEngine()}">${l}</button>`).join('')}</div><p class="gfxnote" id="gfxNote">${gfxStatusText()}</p></div>
     <p class="foot">Power-ups drop in yellow crates on the ice. Grab one and fire it from the power button.</p>
@@ -2501,6 +2578,7 @@ function renderHub(){
   $('sndOn').onchange = e => setMuted(!e.target.checked);
   $('btnControls').onclick = () => openControls('hub');
   $('a_cb').onchange = e => { A11Y.cb = e.target.checked; saveA11y(); applyA11y(); if (G && G.attract) startAttract(); };
+  $('a_rp').onchange = e => { replayOn = e.target.checked; try { localStorage.setItem('rinkrat-replays', replayOn ? '1' : '0'); } catch(err) {} };
   $('a_rm').onchange = e => { A11Y.rm = e.target.checked; saveA11y(); applyA11y(); };
   $('a_btn').querySelectorAll('button').forEach(b => b.onclick = () => { A11Y.btn = b.dataset.v; saveA11y(); applyA11y(); $('a_btn').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
   $('sndVol').oninput = e => { volume = Number(e.target.value)/100; $('sndVolV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-vol', String(volume)); } catch(err) {} ensureAudio(); applyVolume(); };
