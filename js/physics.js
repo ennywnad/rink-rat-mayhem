@@ -76,7 +76,7 @@ function knockOut(s, kind){
   const sp = SPECIES[s.species];
   burst(s.x, s.y, 26, [sp.head, sp.head, s.team==='home' ? HOME.jersey : G.ch.opp.jersey, '#ffffff'], 26, 0.8, 0.9);
   ring(s.x, s.y, 9, '#ffffff', 0.4);
-  const msg = kind==='drown' ? 'SPLASH!' : kind==='well' ? 'SPAGHETTIFIED' : kind==='mine' ? 'KA-BOOM!' : kind==='saw' ? 'SHREDDED' : kind==='fire' ? 'TOASTED' : 'KO!';
+  const msg = kind==='drown' ? 'SPLASH!' : kind==='well' ? 'SPAGHETTIFIED' : kind==='mine' ? 'KA-BOOM!' : kind==='saw' ? 'SHREDDED' : kind==='fire' ? 'TOASTED' : kind==='zam' ? 'RESURFACED' : 'KO!';
   pop(s.x, s.y - 4, msg, s.team==='home' ? '#ec3b4f' : '#ffb51e', 22, 1.4);
   if (s.team==='away') pop(s.x, s.y + 2, 'BODY COUNT +1', '#f1e7d0', 12, 1.4);
   sfx(kind==='drown' ? 'splash' : 'ko'); shake(1.2);
@@ -243,6 +243,7 @@ function updSkater(s, ix, iy, h){
   if (G.pucks[0].owner === s) max *= 0.94;
   if (s.rocket > 0) { max *= 1.6; acc *= 2.3; }
   if (s.slowed) max *= 0.55;
+  const fz = freshAt(s.x, s.y); if (fz > 0) max *= 1 + 0.1*fz;
   if (s.faked > 0) max *= 0.7;
   if (G.low) acc *= 0.62;
   if (s.rocket > 0 && !ix && !iy && s.stun <= 0 && s.frozen <= 0) { ix = Math.cos(s.face); iy = Math.sin(s.face); }
@@ -253,7 +254,7 @@ function updSkater(s, ix, iy, h){
     const im = Math.min(1, hyp(ix, iy)), th = Math.atan2(iy, ix), sp = hyp(s.vx, s.vy), want = max*im;
     const vh = Math.atan2(s.vy, s.vx), dA = angDiff(th, vh);
     if (sp > 7 && Math.abs(dA) < TUNE.stopAngle*DEG && s.stun <= 0) {
-      const rate = (TUNE.carveSlow - (TUNE.carveSlow - TUNE.carveFast)*Math.min(1, sp/Math.max(1, max))) * (s.charging ? 0.75 : 1) * (G.low ? 0.55 : 1) * (s.rocket > 0 ? 0.75 : 1);
+      const rate = (TUNE.carveSlow - (TUNE.carveSlow - TUNE.carveFast)*Math.min(1, sp/Math.max(1, max))) * (s.charging ? 0.75 : 1) * (G.low ? 0.55 : 1) * (s.rocket > 0 ? 0.75 : 1) * (1 - 0.18*fz);
       const turnBy = clamp(dA, -rate*h, rate*h), nh = vh + turnBy;
       let ns = sp + clamp(want - sp, -acc*1.3*h, acc*h);
       ns -= Math.abs(turnBy)*sp*TUNE.carveBleed;                       // a hard carve bleeds a little speed
@@ -271,7 +272,7 @@ function updSkater(s, ix, iy, h){
       s.face = turn(s.face, th, 10*h);
     }
   } else if (s.frozen <= 0) {
-    const f = Math.exp(-(G.low ? 0.4 : 1.5)*h); s.vx *= f; s.vy *= f;
+    const f = Math.exp(-(G.low ? 0.4 : 1.5)*(1 - 0.55*fz)*h); s.vx *= f; s.vy *= f;
   }
   for (const w of G.hz.wells) {
     const dx=w.x-s.x, dy=w.y-s.y, d=hyp(dx,dy);
@@ -288,7 +289,7 @@ function skaterHazards(s, h){
   if (s.ko > 0) return;
   const H = G.hz; s.slowed = false;
   const immune = s.kaiju > 0 || s.inv > 0;
-  for (const o of H.holes) if (hyp(s.x-o.x, s.y-o.y) < o.r - 0.9 && !immune) {
+  for (const o of H.holes) if (!(o.frozen > 0) && hyp(s.x-o.x, s.y-o.y) < o.r - 0.9 && !immune) {
     burst(o.x, o.y, 20, ['#ffffff','#9fc3d8','#3b6b88'], 20, 0.6, 0.8); knockOut(s, 'drown'); return;
   }
   for (const v of H.vents) if (v.on && !v.hit.has(s) && hyp(s.x-v.x, s.y-v.y) < v.r + s.r) {
@@ -301,7 +302,7 @@ function skaterHazards(s, h){
     if (m.dead !== 0 || m.arm > 0 || (m.team && m.team === s.team)) continue;
     if (hyp(s.x-m.x, s.y-m.y) < m.r + s.r + 0.6) { m.dead = m.team ? -1 : 6; explode(m.x, m.y, 10, 58, m.team, 'mine'); }
   }
-  for (const p of H.slime) if (hyp(s.x-p.x, s.y-p.y) < p.r*0.85) { s.slowed = true; if (!immune && rule('kos')) { s.hp -= 7*h; if (s.hp <= 0) { s.lastBy = s.lastBy || other(s.team); knockOut(s, 'hit'); return; } } }
+  for (const p of H.slime) if (!(p.clean > 0) && hyp(s.x-p.x, s.y-p.y) < p.r*0.85) { s.slowed = true; if (!immune && rule('kos')) { s.hp -= 7*h; if (s.hp <= 0) { s.lastBy = s.lastBy || other(s.team); knockOut(s, 'hit'); return; } } }
   for (const w of H.wells) if (hyp(s.x-w.x, s.y-w.y) < w.r && !immune) { burst(w.x, w.y, 18, ['#ffffff','#9db8ff','#3d2a80'], 16, 0.5, 0.8); knockOut(s, 'well'); return; }
   s.sawCd -= h;
   for (const w of H.saws) if (s.sawCd <= 0 && hyp(s.x-w.x, s.y-w.y) < w.r + s.r) {
@@ -543,7 +544,8 @@ function stepPuck(P, h){
   } else {
     P.x += P.vx*h; P.y += P.vy*h;
     let fr = G.low ? 0.1 : 0.32;
-    for (const p of G.hz.slime) if (hyp(P.x-p.x, P.y-p.y) < p.r*0.85) fr = 2.6;
+    { const fz = freshAt(P.x, P.y); if (fz > 0) fr *= 1 - 0.6*fz; }   // fresh ice from the resurfacer is quick
+    for (const p of G.hz.slime) if (!(p.clean > 0) && hyp(P.x-p.x, P.y-p.y) < p.r*0.85) fr = 2.6;
     const f = Math.exp(-fr*h); P.vx *= f; P.vy *= f;
     for (const w of G.hz.wells) { const dx=w.x-P.x, dy=w.y-P.y, d=hyp(dx,dy); if (d < w.R) { const k = 110*(1-d/w.R); P.vx += dx/d*k*h; P.vy += dy/d*k*h; } if (d < w.r) { const a = rand(0, Math.PI*2); P.x = w.x + Math.cos(a)*(w.r+1); P.y = w.y + Math.sin(a)*(w.r+1); P.vx = Math.cos(a)*55; P.vy = Math.sin(a)*55; ring(w.x, w.y, 6, '#9db8ff', 0.4); } }
     for (const s of G.sk) if (s.magnet > 0 && s.ko <= 0 && !P.bonus) { const [sx, sy] = stickPt(s), dx=sx-P.x, dy=sy-P.y, d=hyp(dx,dy); if (d < 32 && d > 0.5) { P.vx += dx/d*170*h; P.vy += dy/d*170*h; const v = hyp(P.vx,P.vy); if (v > 55) { P.vx *= 55/v; P.vy *= 55/v; } } }
@@ -569,7 +571,8 @@ function stepPuck(P, h){
   for (const w of G.hz.saws) { const dx=P.x-w.x, dy=P.y-w.y, d=hyp(dx,dy), rr=w.r+PUCK_R; if (d < rr && d > 0) { const nx=dx/d, ny=dy/d; P.x = w.x+nx*rr; P.y = w.y+ny*rr; const vn = P.vx*nx+P.vy*ny; if (vn < 0) { P.vx -= 1.8*vn*nx; P.vy -= 1.8*vn*ny; P.vx += w.dir*20; sfx('saw'); burst(P.x, P.y, 5, ['#ffd77a','#ffffff'], 14, 0.3, 0.3); } } }
   goaliePuck(G.gH, P); goaliePuck(G.gA, P);
   for (const s of G.sk) bodyPuck(P, s);
-  for (const o of G.hz.holes) if (hyp(P.x-o.x, P.y-o.y) < o.r - 0.6) {
+  zamPuck(P);
+  for (const o of G.hz.holes) if (!(o.frozen > 0) && hyp(P.x-o.x, P.y-o.y) < o.r - 0.6) {
     burst(P.x, P.y, 14, ['#ffffff','#9fc3d8'], 14, 0.5, 0.6); sfx('splash');
     if (P.bonus) { P.life = 0; return; }
     if (G.state === 'play' && !G.attract && !rule('faceoffs')) { Object.assign(P, { x:CX, y:100, vx:rand(-4,4), vy:rand(-4,4), sunk:false, icing:null, shotBy:null }); toast('Fresh puck', 'Dropped at center ice', 1100, 'small'); return; }

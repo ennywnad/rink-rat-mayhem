@@ -6,7 +6,7 @@ function frame(t){
   const dt = Math.min(0.05, (t - last)/1000 || 0); last = t;
   try { pollPad(); } catch(e) {}
   if (!paused) update(dt);
-  try { updateCrowd(); musicTick(); } catch(e) {}
+  try { updateCrowd(); musicTick(); updateZamAudio(); } catch(e) {}
   const R3 = window.__r3d;
   let drew = false;
   if (R3 && R3.active) {

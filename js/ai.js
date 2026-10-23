@@ -9,12 +9,13 @@ function moveTo(s, tx, ty){
   const H = G.hz;
   const rep = (hx, hy, R) => { const ex = s.x-hx, ey = s.y-hy, e = hyp(ex, ey); if (e < R && e > 0.01) { const k = (R-e)/R*avoid*1.6; dx += ex/e*k; dy += ey/e*k; } };
   if (s.kaiju <= 0) {
-    for (const o of H.holes) rep(o.x, o.y, o.r+6);
+    for (const o of H.holes) if (!(o.frozen > 0)) rep(o.x, o.y, o.r+6);
     for (const v of H.vents) { const ph = (v.t % 5.5); if (ph > 3.1) rep(v.x, v.y, v.r+5); }
     for (const mi of H.mines) if (mi.dead === 0 && (!mi.team || mi.team !== s.team)) rep(mi.x, mi.y, 7);
     for (const w of H.wells) rep(w.x, w.y, 9);
     for (const w of H.saws) rep(w.x, w.y, 7);
   }
+  if (G.zam && !G.zam.hide) { const Z = G.zam, c = Math.cos(Z.a), sn = Math.sin(Z.a); rep(Z.x, Z.y, 9); rep(Z.x + c*(ZAM_LH + 4), Z.y + sn*(ZAM_LH + 4), 9); }
   const m2 = hyp(dx, dy); if (m2 > 1) { dx /= m2; dy /= m2; }
   return [dx, dy];
 }

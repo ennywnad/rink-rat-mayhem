@@ -12,6 +12,7 @@ function update(dt){
   const H = G.hz;
   for (const v of H.vents) { v.t += dt; const ph = v.t % 5.5, on = ph > 4.4; if (on && !v.on) { v.hit = new Set(); sfx('fire', 0.6); } v.on = on; if (on) burst(v.x+rand(-1,1), v.y+rand(-1,1), 2, ['#ff6a1a','#ffb51e','#fff1b0'], 6, 0.9, 0.5); }
   for (const w of H.saws) { w.x += w.dir*w.sp*dt; if (w.x > 77) { w.x = 77; w.dir = -1; } if (w.x < 8) { w.x = 8; w.dir = 1; } w.a += dt*18; }
+  if (!G.replay && G.state !== 'end') zamStep(dt);
   for (let i=H.mines.length-1;i>=0;i--){ const m = H.mines[i]; if (m.arm > 0) m.arm -= dt; if (m.team) { m.life -= dt; if (m.life <= 0 || m.dead < 0) { H.mines.splice(i,1); continue; } } else if (m.dead > 0) { m.dead -= dt; if (m.dead <= 0) { m.dead = 0; const idx = H.placed.indexOf(m.spot); if (idx >= 0) H.placed.splice(idx,1); const s = placeSpot(1.6, H.placed); if (s) { m.x = s.x; m.y = s.y; m.spot = s; } m.arm = 0.8; } } }
   for (let i=G.traps.length-1;i>=0;i--){ G.traps[i].life -= dt; if (G.traps[i].life <= 0) G.traps.splice(i,1); }
   for (let i=G.walls.length-1;i>=0;i--){ G.walls[i].life -= dt; if (G.walls[i].life <= 0) { burst(CX, G.walls[i].y, 16, ['#e8f6ff','#9fd6ff'], 12, 0.5, 0.6); G.walls.splice(i,1); } }

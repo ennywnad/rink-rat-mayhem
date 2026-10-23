@@ -184,6 +184,7 @@ function setGfx(p){
 }
 window.__sim = {
   replayView, humanSk, humans, humanOf, reducedMotion: () => !!A11Y.rm,
+  Z: { ZAM, GATE: ZAM_GATE, R: ZAM_R, LH: ZAM_LH, FRESH, SP: ZAM_SP },
   audio: () => ({ ctx: AC ? AC.state : null, loaded: Object.values(sfxBuf).reduce((n, l) => n + l.length, 0), crowd: !!crowdSrc, muted, volume, crowdVol, musicVol, music: cueOn() ? musCue.name : null, loop: !!musLoop, organ: Object.values(musBuf).reduce((n, l) => n + l.length, 0) }),
   get G(){ return G; }, ctrlSk, stickPt, aimAngle, HOME, SPECIES,
   C:{ RW, RL, CR, CX, GT, GB, PL, PRt, ND, PUCK_R, SK_R, G_R },

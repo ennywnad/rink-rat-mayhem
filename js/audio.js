@@ -6,10 +6,10 @@
 let AC = null, noise = null, master = null, sfxBus = null, crowdBus = null, crowdGain = null, crowdSrc = null;
 let volume = 0.8, crowdVol = 0.6, musicVol = 0.6, musicBus = null;
 try { const v = parseFloat(localStorage.getItem('rinkrat-vol')); if (v >= 0 && v <= 1) volume = v; const c = parseFloat(localStorage.getItem('rinkrat-crowdvol')); if (c >= 0 && c <= 1) crowdVol = c; const m = parseFloat(localStorage.getItem('rinkrat-musicvol')); if (m >= 0 && m <= 1) musicVol = m; } catch(e) {}
-const SFX_SET = { stick:4, shot:3, slap:3, board:3, post:2, pad:3, check:3, skate:4, stop:2, whistle:1, horn:1, buzzer:1, boom:1, splash:1, fire:1, zap:1, thunder:1, freeze:1, grow:1, rocket:1, saw:1, pickup:1, ko:1, level:1, cheer:1, aww:1, crowd:1 };
-const SFX_GAIN = { stick:0.5, shot:0.7, slap:0.85, board:0.7, post:0.55, pad:0.6, check:0.85, skate:0.16, stop:0.32, whistle:0.42, horn:0.5, buzzer:0.45, boom:0.8, splash:0.6, fire:0.55, zap:0.5, thunder:0.75, freeze:0.5, grow:0.6, rocket:0.55, saw:0.45, pickup:0.45, ko:0.55, level:0.5, cheer:0.75, aww:0.55 };
+const SFX_SET = { zamhorn:1, zamengine:1, stick:4, shot:3, slap:3, board:3, post:2, pad:3, check:3, skate:4, stop:2, whistle:1, horn:1, buzzer:1, boom:1, splash:1, fire:1, zap:1, thunder:1, freeze:1, grow:1, rocket:1, saw:1, pickup:1, ko:1, level:1, cheer:1, aww:1, crowd:1 };
+const SFX_GAIN = { zamhorn:0.4, stick:0.5, shot:0.7, slap:0.85, board:0.7, post:0.55, pad:0.6, check:0.85, skate:0.16, stop:0.32, whistle:0.42, horn:0.5, buzzer:0.45, boom:0.8, splash:0.6, fire:0.55, zap:0.5, thunder:0.75, freeze:0.5, grow:0.6, rocket:0.55, saw:0.45, pickup:0.45, ko:0.55, level:0.5, cheer:0.75, aww:0.55 };
 const SFX_GAP = { skate:0.1, stick:0.04, cheer:1.5, aww:1.5 };
-const NO_PITCH = new Set(['whistle', 'horn', 'buzzer', 'level', 'pickup', 'cheer', 'aww']);
+const NO_PITCH = new Set(['zamhorn', 'whistle', 'horn', 'buzzer', 'level', 'pickup', 'cheer', 'aww']);
 const sfxRaw = {}, sfxBuf = {}, sfxLast = {};
 // fetch the bytes right away; decode once the audio context exists (after the first tap / key / button)
 for (const [name, n] of Object.entries(SFX_SET)) for (let i=0;i<n;i++) {
@@ -122,6 +122,7 @@ function synthSfx(type, v){
       const g = AC.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.16,t+0.06); g.gain.setValueAtTime(0.16,t+1.7); g.gain.exponentialRampToValueAtTime(0.0001,t+2.1);
       f.connect(g); g.connect(out); [138,174,207].forEach(fr => { const o = AC.createOscillator(); o.type='sawtooth'; o.frequency.value=fr; o.connect(f); o.start(t); o.stop(t+2.2); }); break;
     }
+    case 'zamhorn': tone('square',392,0.26,0.05,0.01); tone('square',494,0.26,0.04,0.01); tone('square',392,0.4,0.05,0.01,null,0.38); tone('square',494,0.4,0.04,0.01,null,0.38); break;
     case 'buzzer': tone('square',196,1.0,0.08,0.01); tone('square',198.5,1.0,0.06,0.01); break;
     case 'level': [523,659,784,1047].forEach((f,i) => tone('square',f,0.18,0.07,0.005,null,i*0.09)); break;
   }
@@ -183,4 +184,26 @@ function musicTick(){
   const y = G.pucks[0].y, press = G.mode === 'vs' ? Math.abs(y - 100) > 30 : y < 70;
   if (!press) { G.musNext = G.time + 3; return; }
   organ(Math.random() < 0.7 ? 'rally' : 'noodle'); G.musNext = G.time + 40 + Math.random()*30;
+}
+
+// ---------------- resurfacer engine: a diesel idle that swells when the machine is near the puck
+let zamSrc = null, zamGain = null;
+function updateZamAudio(){
+  if (!AC || !sfxBus) return;
+  const Z = G && !G.attract && !G.replay && G.zam && !G.zam.hide ? G.zam : null;
+  if (!Z && !zamSrc) return;
+  if (Z && !zamSrc && sfxBuf.zamengine) {
+    zamSrc = AC.createBufferSource(); zamSrc.buffer = sfxBuf.zamengine[0]; zamSrc.loop = true;
+    zamGain = AC.createGain(); zamGain.gain.value = 0; zamSrc.connect(zamGain); zamGain.connect(sfxBus); zamSrc.start();
+  }
+  if (!zamSrc) return;
+  const t = AC.currentTime;
+  if (!Z || paused) {
+    zamGain.gain.setTargetAtTime(0, t, 0.25);
+    if (!Z) { const src = zamSrc; zamSrc = null; try { src.stop(t + 1.2); } catch(e) {} }
+    return;
+  }
+  const P = G.pucks[0], d = hyp(Z.x - P.x, Z.y - P.y);
+  zamGain.gain.setTargetAtTime(0.1 + 0.22*clamp(1 - d/70, 0, 1), t, 0.3);
+  zamSrc.playbackRate.setTargetAtTime(0.85 + 0.25*clamp(Z.sp/ZAM_SP, 0, 1), t, 0.3);
 }

@@ -527,9 +527,41 @@ def org_loop():       # locker room / intermission: an easy 16-bar organ swing t
 ORGAN = {'org_intro': org_intro, 'org_rally': org_rally, 'org_goal': org_goal, 'org_sad': org_sad, 'org_end': org_end,
          'org_noodle_0': lambda: org_noodle(0), 'org_noodle_1': lambda: org_noodle(1), 'org_noodle_2': lambda: org_noodle(2)}
 
+
+# ------------------------------------------------------------------ ice resurfacer
+def zam_engine():     # a lumpy diesel idle; every frequency is a multiple of 1/3 Hz so the 3 s file loops seamlessly
+    d = 6.0; t = T(d); y = np.zeros_like(t)               # render two cycles and keep the second, once the filters have settled
+    fire = 26.0 + 2/3                                   # firing rate
+    for n in range(1, 40):
+        amp = 1 / n ** 0.9 * (1.4 if n % 2 == 0 else 1.0)
+        y += amp * np.sin(2 * np.pi * fire * n * t + rng.uniform(0, 2 * np.pi))
+    lump = 1 + 0.35 * np.sin(2 * np.pi * (fire / 4) * t) + 0.15 * np.sin(2 * np.pi * (fire / 2) * t + 1.1)
+    y = filt(sat(y * lump * 0.18, 2.6), 'lp', 900, 3)
+    # tappet and exhaust rattle: noise gated by the firing pulses (periodic, so it loops)
+    gate = np.clip(np.sin(2 * np.pi * fire * t), 0, 1) ** 6
+    n = filt(noise(d), 'bp', (1400, 4200)) * gate * 0.22
+    y = y + n + 0.08 * filt(noise(d), 'lp', 140)
+    return y[int(3.0 * SR):]
+
+def zam_horn():       # a tinny two-tone truck honk: beep beep
+    d = 0.95; t = T(d); y = np.zeros_like(t)
+    for t0, dur in ((0.0, 0.28), (0.38, 0.42)):
+        seg = (t >= t0) & (t < t0 + dur); tt = t[seg] - t0
+        tone = np.zeros_like(tt)
+        for f0 in (392.0, 494.0):
+            for n in range(1, 14):
+                tone += np.sin(2 * np.pi * f0 * n * tt) / n
+        e = np.minimum(1, tt / 0.012) * np.minimum(1, (dur - tt) / 0.03)
+        y[seg] += sat(tone * 0.3, 2.4) * e
+    y = filt(filt(y, 'hp', 300), 'lp', 3800, 3)
+    return verb(y, wet=0.35, stereo=True, tail=1.2)
+
 # ------------------------------------------------------------------ render the pack
 if __name__ == '__main__':
     import sys
+    if '--zam' in sys.argv:
+        write('zamhorn_0', zam_horn()); write('zamengine_0', zam_engine(), br='80k', loop=True)
+        sys.exit(0)
     if '--organ' in sys.argv:
         for name, fn in ORGAN.items(): write(name, fn(), br='128k')
         write('org_loop', org_loop(), br='112k', loop=True)
@@ -549,5 +581,6 @@ if __name__ == '__main__':
     for name, fn in singles.items():
         write(f'{name}_0', fn(), br='112k' if name in ('horn', 'cheer') else '96k')
     write('crowd_0', crowd_loop(), br='80k')
+    write('zamhorn_0', zam_horn()); write('zamengine_0', zam_engine(), br='80k', loop=True)
     for name, fn in ORGAN.items(): write(name, fn(), br='128k')
     write('org_loop', org_loop(), br='112k', loop=True)

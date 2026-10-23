@@ -1,11 +1,11 @@
 // Rink Rat Mayhem · Versus: multi-period exhibition games (P1 vs P2, co-op vs CPU, or solo vs CPU) with intermissions and stats
 'use strict';
 const vsDef = () => ({ team:'magma', arena:'boneyard', players:'vs', skaters:3, periods:3, len:180, cpu:4,
-  rules:{ icing:true, faceoffs:true, checking:true, kos:true, hazards:true, powerups:true } });
+  rules:{ icing:true, faceoffs:true, checking:true, kos:true, hazards:true, zam:true, powerups:true } });
 let vsCfg = vsDef();
 try { const v = JSON.parse(localStorage.getItem('rinkrat-vs') || 'null'); if (v && typeof v === 'object') { const d = vsDef(); vsCfg = { ...d, ...v, rules:{ ...d.rules, ...(v.rules || {}) } }; } } catch(e) {}
 const saveVs = () => { try { localStorage.setItem('rinkrat-vs', JSON.stringify(vsCfg)); } catch(e) {} };
-const VS_RULES = [['icing','Icing'],['checking','Body checking'],['kos','Knockouts'],['hazards','Arena hazards'],['powerups','Power-up crates']];
+const VS_RULES = [['icing','Icing'],['checking','Body checking'],['kos','Knockouts'],['hazards','Arena hazards'],['zam','Ice resurfacer'],['powerups','Power-up crates']];
 const ARENA_SHORT = { boneyard:'Boneyard', magma:'Magma', mines:'Mines', sludge:'Sludge', orbital:'Orbital', sawmill:'Sawmill', abyss:'Abyss' };
 
 function openVersus(){ renderVersus(); show('vsset'); }

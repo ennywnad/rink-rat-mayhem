@@ -11,7 +11,7 @@ function snapState(){
   return { t:G.time,
     sk: G.sk.map(s => [REC_SK.map(k => s[k]), s.bl ? [s.bl.a, s.bl.r, s.bl.x, s.bl.y] : null]),
     g: [G.gH, G.gA].map(g => REC_G.map(k => g[k])),
-    p: [REC_P.map(k => P[k]), P.owner ? G.sk.indexOf(P.owner) : -1, P.hold === G.gH ? 0 : P.hold === G.gA ? 1 : -1] };
+    p: [REC_P.map(k => P[k]), P.owner ? G.sk.indexOf(P.owner) : -1, P.hold === G.gH ? 0 : P.hold === G.gA ? 1 : -1], z: zamSnap() };
 }
 function applyState(f){
   f.sk.forEach(([vals, bl], i) => { const s = G.sk[i]; if (!s) return; REC_SK.forEach((k, j) => { s[k] = vals[j]; }); if (bl && s.bl) { [s.bl.a, s.bl.r, s.bl.x, s.bl.y] = bl; s.bl.va = s.bl.vr = 0; } });
@@ -19,6 +19,7 @@ function applyState(f){
   const P = G.pucks[0]; REC_P.forEach((k, j) => { P[k] = f.p[0][j]; });
   P.owner = f.p[1] >= 0 ? G.sk[f.p[1]] : null; P.hold = f.p[2] === 0 ? G.gH : f.p[2] === 1 ? G.gA : null;
   P.trail.length = 0;
+  if (f.z !== undefined) zamApply(f.z);
 }
 function recordFrame(){
   if (!G || G.attract || G.replay) return;

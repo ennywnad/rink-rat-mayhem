@@ -98,10 +98,10 @@ const saveTune = () => { try { const ch = {}; for (const [, items] of TUNE_DEF) 
 // ---------------- rules, team attributes, practice config
 const ATTRS = [['speed','Speed'],['accel','Acceleration'],['shot','Shot power'],['check','Checking'],['handle','Puck control'],['goalie','Goalie']];
 const defAttrs = () => Object.fromEntries(ATTRS.map(([k]) => [k, 1]));
-const RULES = [['icing','Icing','Clearing the puck from your half past the far goal line brings a faceoff back'],['faceoffs','Faceoffs after goals','Off keeps play going: the goalie or a fresh puck restarts it'],['checking','Body checking','Off still allows poke checks'],['kos','Knockouts','Off means hits and hazards never drain health'],['hazards','Arena hazards','Holes, vents, mines, sludge, wells and saws'],['powerups','Power-up crates','Crates drop on the ice. In practice they hold every power-up you have unlocked']];
-const DEFAULT_RULES = { icing:false, faceoffs:true, checking:true, kos:true, hazards:true, powerups:true };
+const RULES = [['icing','Icing','Clearing the puck from your half past the far goal line brings a faceoff back'],['faceoffs','Faceoffs after goals','Off keeps play going: the goalie or a fresh puck restarts it'],['checking','Body checking','Off still allows poke checks'],['kos','Knockouts','Off means hits and hazards never drain health'],['hazards','Arena hazards','Holes, vents, mines, sludge, wells and saws'],['zam','Ice resurfacer','An arena-themed machine laps the rink during play and leaves fresh, fast ice'],['powerups','Power-up crates','Crates drop on the ice. In practice they hold every power-up you have unlocked']];
+const DEFAULT_RULES = { icing:false, faceoffs:true, checking:true, kos:true, hazards:true, zam:true, powerups:true };
 const practiceDef = () => ({ arena:'boneyard', players:'1p', opp:2, mates:0, goalies:'both', effort:'light', clock:0,
-  rules:{ icing:true, faceoffs:false, checking:true, kos:true, hazards:true, powerups:true }, attrs:{ home:defAttrs(), away:defAttrs() } });
+  rules:{ icing:true, faceoffs:false, checking:true, kos:true, hazards:true, zam:true, powerups:true }, attrs:{ home:defAttrs(), away:defAttrs() } });
 let practice = practiceDef();
 try { const pr = JSON.parse(localStorage.getItem('rinkrat-practice') || 'null'); if (pr && typeof pr === 'object') { const d = practiceDef(); practice = { ...d, ...pr, rules:{ ...d.rules, ...(pr.rules||{}) }, attrs:{ home:{ ...d.attrs.home, ...((pr.attrs||{}).home||{}) }, away:{ ...d.attrs.away, ...((pr.attrs||{}).away||{}) } } }; } } catch(e) {}
 const gameDef = () => ({ rules:{ ...DEFAULT_RULES }, attrs:{ home:defAttrs(), away:defAttrs() } });
@@ -126,6 +126,7 @@ function newMatch(ch, attract, mode){
     practice:pr, effort: pr ? pr.effort : 'full', rules: ch.vsCfg ? { ...ch.vsCfg.rules } : pr ? { ...pr.rules } : attract ? { ...DEFAULT_RULES } : { ...gameCfg.rules }, attr: pr ? JSON.parse(JSON.stringify(pr.attrs)) : attract ? { home:defAttrs(), away:defAttrs() } : JSON.parse(JSON.stringify(gameCfg.attrs)), regT:0, foSpot:null };
   if (ch.start) { G.score.home = ch.start[0]; G.score.away = ch.start[1]; }
   G.hz = buildHazards(G.rules.hazards ? ch.hz : {});
+  zamInit();
   G.stats = newStats();
   const vc = ch.vsCfg || null;
   const nHome = vc ? vc.skaters : pr ? 1 + pr.mates : ch.short && !attract ? 2 : 3, nAway = vc ? vc.skaters : pr ? pr.opp : 3;

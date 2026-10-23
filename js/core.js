@@ -129,7 +129,7 @@ try { const s = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (s && typeo
 let muted = false;
 try { muted = localStorage.getItem('rinkrat-mute') === '1'; } catch(e) {}
 let dbDoc = null, dbChain = Promise.resolve();
-const GAME_VERSION = 'v1.6.0';
+const GAME_VERSION = 'v1.7.0';
 // save codes: "RRM1." + base64url(JSON)
 function exportSave(){ const j = JSON.stringify({ ...save, updatedAt:Date.now() }); return 'RRM1.' + btoa(unescape(encodeURIComponent(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function importSave(code){
