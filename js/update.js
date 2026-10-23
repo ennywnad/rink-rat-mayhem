@@ -73,6 +73,8 @@ function update(dt){
   }
   const P0 = G.pucks[0]; if (P0.passTo) { P0.passT -= dt; if (P0.passT <= 0 || P0.owner) { P0.passTo = null; if (!P0.owner) P0.passBy = null; } }
   const inputs = G.sk.map(s => { const hp = humanOf(s); return (G.state === 'regroup' || G.state === 'faceoff') ? regroupInput(s) : (hp >= 0 && G.state === 'play') ? readInput(hp) : (G.state === 'play' ? aiSkater(s, dt) : [0,0]); });
+  for (const s of G.sk) s.lockNet = false;
+  if (!G.attract) for (let p = 0; p < humans(); p++) { const hs = humanSk(p); if (hs) hs.lockNet = faceHeld(p); }
   const sub = 3, h = dt/sub;
   for (let i=0;i<sub;i++){
     for (let k=0;k<G.sk.length;k++){ updSkater(G.sk[k], inputs[k][0], inputs[k][1], h); updBlade(G.sk[k], h); }

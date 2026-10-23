@@ -1,6 +1,6 @@
 {
   "name": "rink-rat-mayhem",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "description": "A 3-on-3 mutant hockey brawler for the browser.",
   "type": "module",

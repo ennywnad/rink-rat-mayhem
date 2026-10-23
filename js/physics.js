@@ -244,6 +244,7 @@ function updSkater(s, ix, iy, h){
   if (s.rocket > 0) { max *= 1.6; acc *= 2.3; }
   if (s.slowed) max *= 0.55;
   const fz = freshAt(s.x, s.y); if (fz > 0) max *= 1 + 0.1*fz;
+  if (s.lockNet && (ix || iy)) { const off = Math.abs(angDiff(Math.atan2(iy, ix), s.face)); max *= off > 2.1 ? 0.86 : off > 1.2 ? 0.95 : 1; }   // backward skating is a bit slower
   if (s.faked > 0) max *= 0.7;
   if (G.low) acc *= 0.62;
   if (s.rocket > 0 && !ix && !iy && s.stun <= 0 && s.frozen <= 0) { ix = Math.cos(s.face); iy = Math.sin(s.face); }
@@ -278,6 +279,8 @@ function updSkater(s, ix, iy, h){
     const dx=w.x-s.x, dy=w.y-s.y, d=hyp(dx,dy);
     if (d < w.R && s.kaiju <= 0) { const k = 75*(1-d/w.R); s.vx += dx/d*k*h; s.vy += dy/d*k*h; }
   }
+  // face the net (held): whatever direction they skate, the body stays square to the goal they attack
+  if (s.lockNet && s.stun <= 0 && s.frozen <= 0) s.face = turn(s.face, Math.atan2(goalY(s.team) - s.y, CX - s.x), 12*h);
   const tr = s.kaiju > 0 ? s.baseR*1.75 : s.baseR; s.r += (tr - s.r) * Math.min(1, h*6);
   s.x += s.vx*h; s.y += s.vy*h;
   const b = boardCollide(s, s.r, 0.25); if (b > 16) sfx('board', b*0.7);

@@ -11,6 +11,7 @@ A 3-on-3 mutant hockey brawler that runs in your browser. Lead the Rink Rats thr
 - **Seven challenges**, each one period with its own arena, hazards and objective: Opening Night, Hot Hands, Body Count, Brick Wall, Gravity Well, Shorthanded and the Mayhem Cup Final. Bonus objectives earn up to three stars each.
 - **Progression:** XP unlocks 12 power-ups and more loadout slots. The power-ups are Rocket Skates, Oil Slick, Fireball Puck, Land Mine, Magnet Stick, Shrink Ray, Ice Wall, Heat-Seeker, Kaiju Mode, Split Shot, Thunderstrike and Deep Freeze.
 - **Skill stick:** move your stick with the right stick to stickhandle and poke-check. Pull it back and flick it forward to shoot.
+- **Face the net:** hold LT (F on the keyboard) and your skater keeps their body square to the goal they're attacking, whichever way they skate: circle the net, drift sideways or skate backwards (a little slower) and stay ready to shoot.
 - **One-timers and dekes:** press shoot while a pass is on its way to fire it straight off the pass. The deke button does a toe drag toward wherever the right stick points, or a between-the-legs move with the stick centred; defenders in front get fooled for a moment.
 - **Versus mode:** full exhibition games from the locker room. P1 vs P2, P1 + P2 vs the CPU, or P1 alone vs the CPU. Pick the opponent team, arena, 2 or 3 skaters a side, 1–3 periods of 2, 3 or 5 minutes, CPU skill and the rules. Ties go to sudden-death overtime.
 - **Game stats:** goals, shots, saves, hits, knockouts, possession, passing, takeaways, one-timers, dekes and power-ups for both teams, with goals by period. Shown at every intermission, at the final horn, on challenge results and from the pause menu.
@@ -33,6 +34,7 @@ A 3-on-3 mutant hockey brawler that runs in your browser. Lead the Rink Rats thr
 | Skill shot | Hold K (back), then tap I | Pull the right stick back, then flick it forward | — |
 | Shoot (hold to wind up) / body-check | Space | A / RT | Shoot button |
 | Pass / switch player | Shift | X / LB | Pass button |
+| Face the net (hold) | F | LT | Face button |
 | Deke | Q | Y / R3 | — |
 | Power-up | E | B / RB | Power button |
 | Pause | P / Esc | Start / Menu | Pause button |
@@ -51,7 +53,7 @@ Open **Versus** in the locker room for full games, pick **2P co-op** or **2P ver
 | --- | --- | --- |
 | Two controllers | Controller 1 (+ keyboard) | Controller 2 |
 | One controller | Keyboard | Controller |
-| None | Left side of the keyboard: WASD skate, F shoot, G pass, R power-up, Q deke | Right side: arrows skate, / shoot, . pass, , power-up, ; deke |
+| None | Left side of the keyboard: WASD skate, F shoot, G pass, R power-up, Q deke, E face the net | Right side: arrows skate, / shoot, . pass, , power-up, ; deke, ' face the net |
 
 P1 is marked amber and P2 cyan.
 

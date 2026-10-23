@@ -5,17 +5,23 @@
 const keys = new Set();
 let JR = 46;
 const joy = { id:null, bx:0, by:0, x:0, y:0 };
-const ACTIONS = [['up','Skate up'],['down','Skate down'],['left','Skate left'],['right','Skate right'],['stUp','Stick forward'],['stDown','Stick back'],['stLeft','Stick left'],['stRight','Stick right'],['shoot','Shoot (hold) · check'],['pass','Pass · switch player'],['power','Power-up'],['deke','Deke']];
-const PAD_ACTIONS = ['shoot', 'pass', 'power', 'deke'];
+const ACTIONS = [['up','Skate up'],['down','Skate down'],['left','Skate left'],['right','Skate right'],['stUp','Stick forward'],['stDown','Stick back'],['stLeft','Stick left'],['stRight','Stick right'],['shoot','Shoot (hold) · check'],['pass','Pass · switch player'],['power','Power-up'],['deke','Deke'],['face','Face the net (hold)']];
+const PAD_ACTIONS = ['shoot', 'pass', 'power', 'deke', 'face'];
 const BIND_PROFILES = [['kb','Keyboard'],['kb1','Shared keyboard · P1'],['kb2','Shared keyboard · P2'],['pad','Controller']];
 const DEF_BINDS = {
-  kb:  { up:['KeyW','ArrowUp'], down:['KeyS','ArrowDown'], left:['KeyA','ArrowLeft'], right:['KeyD','ArrowRight'], stUp:['KeyI'], stDown:['KeyK'], stLeft:['KeyJ'], stRight:['KeyL'], shoot:['Space'], pass:['ShiftLeft','ShiftRight'], power:['KeyE','KeyC'], deke:['KeyQ'] },
-  kb1: { up:['KeyW'], down:['KeyS'], left:['KeyA'], right:['KeyD'], stUp:[], stDown:[], stLeft:[], stRight:[], shoot:['KeyF','Space'], pass:['KeyG'], power:['KeyR'], deke:['KeyQ'] },
-  kb2: { up:['ArrowUp'], down:['ArrowDown'], left:['ArrowLeft'], right:['ArrowRight'], stUp:[], stDown:[], stLeft:[], stRight:[], shoot:['Slash','Numpad0'], pass:['Period','NumpadDecimal'], power:['Comma','NumpadEnter'], deke:['Semicolon'] },
-  pad: { shoot:[0,7], pass:[2,4,6], power:[1,5], deke:[3,11] },
+  kb:  { up:['KeyW','ArrowUp'], down:['KeyS','ArrowDown'], left:['KeyA','ArrowLeft'], right:['KeyD','ArrowRight'], stUp:['KeyI'], stDown:['KeyK'], stLeft:['KeyJ'], stRight:['KeyL'], shoot:['Space'], pass:['ShiftLeft','ShiftRight'], power:['KeyE','KeyC'], deke:['KeyQ'], face:['KeyF'] },
+  kb1: { up:['KeyW'], down:['KeyS'], left:['KeyA'], right:['KeyD'], stUp:[], stDown:[], stLeft:[], stRight:[], shoot:['KeyF','Space'], pass:['KeyG'], power:['KeyR'], deke:['KeyQ'], face:['KeyE'] },
+  kb2: { up:['ArrowUp'], down:['ArrowDown'], left:['ArrowLeft'], right:['ArrowRight'], stUp:[], stDown:[], stLeft:[], stRight:[], shoot:['Slash','Numpad0'], pass:['Period','NumpadDecimal'], power:['Comma','NumpadEnter'], deke:['Semicolon'], face:['Quote'] },
+  pad: { shoot:[0,7], pass:[2,4], power:[1,5], deke:[3,11], face:[6] },
 };
 let binds = JSON.parse(JSON.stringify(DEF_BINDS));
-try { const b = JSON.parse(localStorage.getItem('rinkrat-binds') || 'null'); if (b) for (const p in DEF_BINDS) if (b[p]) for (const a in DEF_BINDS[p]) if (Array.isArray(b[p][a])) binds[p][a] = b[p][a]; } catch(e) {}
+try { const b = JSON.parse(localStorage.getItem('rinkrat-binds') || 'null'); if (b) for (const p in DEF_BINDS) if (b[p]) {
+  for (const a in DEF_BINDS[p]) if (Array.isArray(b[p][a])) binds[p][a] = b[p][a];
+  if (!Array.isArray(b[p].face)) {   // saved before 'face the net' existed: hand it its default unless that key/button is taken (LT used to be a second pass button)
+    if (p === 'pad') binds.pad.pass = binds.pad.pass.filter(i => i !== 6);
+    else binds[p].face = binds[p].face.filter(c => !Object.keys(binds[p]).some(a => a !== 'face' && binds[p][a].includes(c)));
+  }
+} } catch(e) {}
 const saveBinds = () => { try { localStorage.setItem('rinkrat-binds', JSON.stringify(binds)); } catch(e) {} };
 const FIXED_KEYS = ['KeyP', 'Escape', 'KeyM', 'Backquote'];
 let capture = null;   // { profile, action } while the remap screen waits for a key or button
@@ -56,6 +62,15 @@ function readInputRaw(p = 0){
   const m = hyp(x, y); return m ? [x/m, y/m] : [0,0];
 }
 function readInput(p = 0){ return orient(readInputRaw(p)); }
+// 'face the net' is a hold: true while any of this player's devices holds it
+let touchFace = false;
+function faceHeld(p = 0){
+  const d = devicesFor(p);
+  if (d.touch && touchFace) return true;
+  if (held(d.kb, 'face')) return true;
+  for (const ps of d.pads) if (ps.now && (binds.pad.face || []).some(i => ps.now[i])) return true;
+  return false;
+}
 function readSkill(p = 0){
   const d = devicesFor(p);
   for (const ps of d.pads) if (ps.raxes[0] || ps.raxes[1]) return orient(ps.raxes);
@@ -129,6 +144,7 @@ function holdBtn(el, down, up){
 holdBtn($('bShoot'), () => pressShoot(0), () => releaseShoot(0));
 holdBtn($('bPass'), () => pressPass(0));
 holdBtn($('bPower'), () => pressPower(0));
+holdBtn($('bFace'), () => { touchFace = true; }, () => { touchFace = false; });
 window.addEventListener('keydown', e => {
   if (capture && capture.profile !== 'pad') { e.preventDefault(); if (e.code !== 'Escape') bindCaptured(e.code); else endCapture(); return; }
   if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== 'range') return;
@@ -156,7 +172,7 @@ window.addEventListener('keyup', e => {
   if (!G || G.attract) return;
   for (let p = 0; p < humans(); p++) { const kb = devicesFor(p).kb; if (kb && (binds[kb].shoot || []).includes(e.code)) releaseShoot(p); }
 });
-window.addEventListener('blur', () => { keys.clear(); releaseShoot(0); if (humans() > 1) releaseShoot(1); });
+window.addEventListener('blur', () => { keys.clear(); touchFace = false; releaseShoot(0); if (humans() > 1) releaseShoot(1); });
 
 // ---------------- gamepads (standard mapping: Xbox, PlayStation, Switch Pro)
 function scanPads(){
@@ -276,11 +292,11 @@ function ctrlItems(){
     return { src:'Two players', items };
   }
   const pl = padList();
-  if (pl.length) { const L = padLabels(pl[0]), b = a => binds.pad[a].slice(0, 2).map(L.btn); return { src:L.name, items:[[[L.stick, L.dpad], 'Skate'], [[L.rstick], 'Stickhandle · pull back, flick to shoot'], [b('shoot'), 'Shoot (hold) · check'], [b('pass'), 'Pass · switch'], [b('deke'), 'Deke'], [b('power'), 'Power-up'], [[L.start], 'Pause']] }; }
-  if (matchMedia('(pointer:coarse)').matches) return { src:'Touch', items:[[['Left side'], 'Drag to skate'], [['Shoot'], 'Hold · tap to check'], [['Pass'], 'Pass · switch'], [['Power'], 'Power-up']] };
+  if (pl.length) { const L = padLabels(pl[0]), b = a => binds.pad[a].slice(0, 2).map(L.btn); return { src:L.name, items:[[[L.stick, L.dpad], 'Skate'], [[L.rstick], 'Stickhandle · pull back, flick to shoot'], [b('shoot'), 'Shoot (hold) · check'], [b('pass'), 'Pass · switch'], [b('deke'), 'Deke'], [b('face'), 'Face the net (hold)'], [b('power'), 'Power-up'], [[L.start], 'Pause']] }; }
+  if (matchMedia('(pointer:coarse)').matches) return { src:'Touch', items:[[['Left side'], 'Drag to skate'], [['Shoot'], 'Hold · tap to check'], [['Pass'], 'Pass · switch'], [['Power'], 'Power-up'], [['Face'], 'Hold to face the net']] };
   const k = a => kbKeys('kb', a).slice(0, 2);
   const mv = ['up','left','down','right'].map(a => kbKeys('kb', a)[0]).join('');
-  return { src:'Keyboard', items:[[[mv], 'Skate'], [[['stUp','stLeft','stDown','stRight'].map(a => kbKeys('kb', a)[0] || '').join('')], 'Stickhandle · pull back, flick to shoot'], [k('shoot'), 'Shoot (hold) · check'], [k('pass'), 'Pass · switch'], [k('deke'), 'Deke'], [k('power'), 'Power-up'], [['P'], 'Pause'], [['M'], 'Mute'], [['`'], 'Tuning']] };
+  return { src:'Keyboard', items:[[[mv], 'Skate'], [[['stUp','stLeft','stDown','stRight'].map(a => kbKeys('kb', a)[0] || '').join('')], 'Stickhandle · pull back, flick to shoot'], [k('shoot'), 'Shoot (hold) · check'], [k('pass'), 'Pass · switch'], [k('deke'), 'Deke'], [k('face'), 'Face the net (hold)'], [k('power'), 'Power-up'], [['P'], 'Pause'], [['M'], 'Mute'], [['`'], 'Tuning']] };
 }
 function keyHtml(k){
   if (typeof k === 'string') return `<kbd>${k}</kbd>`;

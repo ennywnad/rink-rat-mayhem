@@ -1314,12 +1314,16 @@ async function init(){
     const freq = 0.9 + speed/27*1.3;
     if (moving) v.phase += dt*freq*Math.PI*2;
     const a = v.stride;
+    // which way they're travelling relative to where they face: +1 forwards, -1 backwards (C-cuts), 0 sideways (shuffle pushes)
+    const fwdRaw = speed > 3 ? (s.vx*Math.cos(s.face) + s.vy*Math.sin(s.face))/speed : 1;
+    v.fwd = (v.fwd ?? 1) + (fwdRaw - (v.fwd ?? 1))*Math.min(1, dt*6);
+    const back = Math.max(0, -v.fwd), sideK = 1 - Math.abs(v.fwd);
     const crouch = cele ? 0.2 : 1;
     const hipsY = 3.25 - (0.75 + a*0.12 + stopK*0.35)*crouch;
     B.hips.position.y = hipsY;
     B.hips.rotation.set(s.stun > 0 ? -0.18 : 0, 0, v.bank*0.8 + (s.stun > 0 ? Math.sin(t*14)*0.16 : 0) + (v.lift || 0)*(v.liftLeg === 'L' ? -0.07 : 0.07));
     const charge = s.charging ? s.charge : 0;
-    B.spine.rotation.set((0.5 + a*0.12)*crouch + stopK*0.1, -charge*0.5, 0);
+    B.spine.rotation.set((0.5 + a*0.12)*crouch + stopK*0.1 - back*0.16, -charge*0.5, 0);
     B.chest.rotation.set(0.12*crouch, -charge*0.3 + Math.sin(v.phase)*0.12*a, 0);
     if ((s.check || 0) > 0) {
       const ck = Math.sin(Math.PI*(1 - s.check/0.34)), side = Math.sign(Math.sin((s.checkDir || 0) - s.face)) || 1;
@@ -1331,7 +1335,8 @@ async function init(){
     // legs
     for (const [sg, n, ph] of [[1, 'L', v.phase], [-1, 'R', v.phase + Math.PI]]) {
       const sn = Math.sin(ph), push = Math.max(0, sn), rec = Math.max(0, -sn);
-      let fx = sg*(0.55 + a*0.85*push + stopK*0.6), fz = 0.25 - a*1.5*sn - stopK*0.3, fy = 0.43 + a*0.32*rec;
+      const dirZ = v.fwd >= 0 ? Math.max(0.3, v.fwd) : Math.min(-0.3, v.fwd)*0.75;   // backwards: the push sweeps forward in a C
+      let fx = sg*(0.55 + a*(0.85 + 0.5*back + 0.35*sideK)*push + stopK*0.6), fz = 0.25 - a*1.5*sn*dirZ - stopK*0.3, fy = 0.43 + a*0.32*rec;
       if (v.cross > 0.02) {
         const ck = v.cross, cs = Math.sin(ph*1.0), cpush = Math.max(0, cs), crec = Math.max(0, -cs);
         if (sg === outSg) { fx += (-sg*0.5 - fx)*crec*ck; fy += 0.42*crec*ck; fz += 0.45*crec*ck - 0.2*cpush*ck; }   // over the top
