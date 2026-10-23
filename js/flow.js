@@ -62,20 +62,22 @@ function scoreGoal(tm, P){
     if (!g.off) { P.hold = g; g.hold = 1.1; P.vx = P.vy = 0; P.shotBy = null; P.passTo = null; }
     else Object.assign(P, { x:CX + rand(-3, 3), y: tm === 'home' ? GT + 14 : GB - 14, vx:rand(-5, 5), vy: tm === 'home' ? 16 : -16, shotBy:null, passTo:null });
     burst(CX, tm === 'home' ? GT : GB, 30, ['#ffb51e','#ec3b4f','#ffffff'], 26, 0.7, 1);
-    if (tm === 'home') { rumbleTeam('home', 0.6, 0.9, 380); toast('GOAL', 'Play on', 1500, 'goal'); sfx('horn'); sfx('cheer'); }
-    else { toast(G.ch.opp.abbr + ' score', 'Play on', 1300, 'small bad'); sfx('whistle'); sfx('aww'); }
+    if (tm === 'home') { rumbleTeam('home', 0.6, 0.9, 380); toast('GOAL', 'Play on', 1500, 'goal'); sfx('horn'); sfx('cheer'); organ('goal', 0.9); }
+    else { toast(G.ch.opp.abbr + ' score', 'Play on', 1300, 'small bad'); sfx('whistle'); sfx('aww'); organ(G.mode === 'vs' ? 'goal' : 'sad', 0.7); }
     return;
   }
   G.state = 'goal'; G.stT = 3; G.goalLight = { team:tm, t:0 }; G.goalAt = G.time; G.replayed = false;
   const gy = tm === 'home' ? GT : GB;
   burst(CX, gy, 40, ['#ffb51e','#ec3b4f','#ffffff'], 30, 0.8, 1.2); shake(1.6);
-  if (tm === 'home') { rumbleTeam('home', 0.7, 1, 450); toast('GOAL', powered ? 'Power-up goal' : `${G.score.home}–${G.score.away}`, 2700, 'goal'); sfx('horn'); sfx('cheer'); }
-  else { toast(G.ch.opp.abbr + ' score', `${G.score.home}–${G.score.away}`, 2400, 'small bad'); sfx('whistle'); sfx('aww'); }
+  if (tm === 'home') { rumbleTeam('home', 0.7, 1, 450); toast('GOAL', powered ? 'Power-up goal' : `${G.score.home}–${G.score.away}`, 2700, 'goal'); sfx('horn'); sfx('cheer'); organ('goal', 0.9); }
+  else { toast(G.ch.opp.abbr + ' score', `${G.score.home}–${G.score.away}`, 2400, 'small bad'); sfx('whistle'); sfx('aww'); organ(G.mode === 'vs' ? 'goal' : 'sad', 0.7); }
   if (!G.attract) checkObjLive();
 }
 function endMatch(){
   G.state = 'end'; sfx('buzzer');
+  if (!G.vs || G.vs.ot || G.vs.period >= G.vs.periods) organ('end', 1.1);
   for (const s of G.sk) s.charging = false;
+  if (G.vs) { toast(G.vs.ot ? 'Overtime winner' : `End of the ${periodName(G.vs.period)}`, `${G.score.home}–${G.score.away}`, 1500, 'small'); versusEnd(); return; }
   if (G.practice) { toast('Practice over', `${G.score.home}–${G.score.away}`, 1600, 'small'); setTimeout(() => { if (G && G.practice && G.state === 'end') { paused = true; preparePause(true); show('pause'); } }, 1500); return; }
   if (G.attract) { setTimeout(() => { if (G && G.attract && G.state === 'end') startAttract(); }, 1500); return; }
   toast('Final', `${G.score.home}–${G.score.away}`, 1500, 'small');
@@ -110,6 +112,7 @@ function condText(c, ch){
     case 'comeback': return 'Start down 0–2. Win anyway';
     case 'takenMax': return `Lose ${c.n} or fewer skaters to KOs`;
     case 'powerGoals': return c.n === 1 ? 'Score a power-up goal' : `Score ${c.n} power-up goals`;
+    case 'versus': return vsText();
     case 'practice': { const pr = ch && ch.practice; return pr ? (pr.players === 'vs' ? `Versus · P1 Rats vs P2 ${ch.opp.abbr}` : `Practice${pr.players === 'coop' ? ' co-op' : ''} · ${pr.opp} opponent${pr.opp === 1 ? '' : 's'} · ${pr.effort === 'full' ? 'full effort' : pr.effort}`) : 'Practice'; }
   }
   return '';
@@ -124,7 +127,7 @@ function condProg(c, st){
     case 'takenMax': return `${st.kos.away}/${c.n}`;
     case 'powerGoals': return `${Math.min(st.powerGoals, c.n)}/${c.n}`;
     case 'shutout': return a === 0 ? 'Clean' : 'Broken';
-    case 'practice': return '';
+    case 'practice': case 'versus': return '';
     default: return h > a ? 'Leading' : h === a ? 'Tied' : 'Trailing';
   }
 }

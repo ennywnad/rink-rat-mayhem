@@ -285,3 +285,22 @@ h3.h{margin:0;font:400 13px/1 var(--block);letter-spacing:.1em;color:var(--muted
 .bchip .bx:hover{color:var(--bone)}
 #ctrlsTabs{flex-wrap:wrap}
 @media (max-width:520px){.brow{grid-template-columns:1fr auto}.brow .bv{grid-column:1/-1;grid-row:2}}
+.teamgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.teambtn{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line-hi);border-radius:10px;background:var(--well);color:var(--bone);text-align:left;cursor:pointer}
+.teambtn[aria-pressed="true"]{border-color:var(--hazard);box-shadow:0 0 0 2px var(--hazard) inset}
+.teambtn .swatch{width:22px;height:22px;border-radius:6px;flex:none}
+.teambtn span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.teambtn b{font:600 13px/1.15 var(--body)}
+.teambtn small{font:500 11px/1 var(--body);color:var(--muted);text-transform:capitalize}
+table.stats{width:100%;border-collapse:collapse;font:500 14px/1.2 var(--body);font-variant-numeric:tabular-nums}
+table.stats th,table.stats td{padding:6px 4px;border-bottom:1px solid var(--line)}
+table.stats tbody th{font:500 12px/1.2 var(--body);color:var(--muted);text-align:center;letter-spacing:.02em}
+table.stats td{width:28%;text-align:center;color:var(--bone)}
+table.stats td.lead{color:var(--hazard);font-weight:700}
+table.stats thead th{font:400 12px/1 var(--block);letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--line-hi)}
+table.stats thead th.sh{color:var(--rat)}
+.statsplit{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;font:500 13px/1 var(--body);color:var(--muted)}
+.statsplit b{color:var(--bone);margin-left:4px}
+details.statsbox{border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+details.statsbox summary{cursor:pointer;font:600 14px/1.4 var(--body);color:var(--bone)}
+details.statsbox[open] summary{margin-bottom:8px}

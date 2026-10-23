@@ -19,9 +19,10 @@ function update(dt){
   for (let i=G.pucks.length-1;i>0;i--){ const b = G.pucks[i]; b.life -= dt; if (b.life <= 0) { burst(b.x, b.y, 6, ['#ffffff','#7ef0ff'], 8, 0.4, 0.4); G.pucks.splice(i,1); } }
 
   if (G.state === 'end') return;
-  if (G.state === 'faceoff') { G.stT -= dt; if (G.stT <= 0) { G.state = 'play'; for (const s of G.sk) s.foT = null; const P = G.pucks[0]; P.vx = rand(-3,3); P.vy = rand(-1,1); sfx('whistle'); } else if (!G.sk.some(s => s.foT)) return; }
+  if (G.state === 'faceoff') { G.stT -= dt; if (G.stT <= 0) { G.state = 'play'; for (const s of G.sk) s.foT = null; const P = G.pucks[0]; P.vx = rand(-3,3); P.vy = rand(-1,1); sfx('whistle'); musicFade(); } else if (!G.sk.some(s => s.foT)) return; }
   if (G.replay) { stepReplay(dt); return; }
   if (G.state === 'goal' && !G.replayed && replayOn && !G.attract && G.stT <= 2.45) { G.replayed = true; startReplay(); if (G.replay) return; }
+  if (G.state === 'goal' && G.vs && G.vs.ot && G.stT - dt <= 0) { endMatch(); return; }   // sudden death
   if (G.state === 'goal' || G.state === 'reset') { G.stT -= dt; if (G.stT <= 0) { startRegroup({ x:CX, y:100 }); return; } }
   if (G.state === 'regroup') { G.regT += dt; if (G.regT > 0.6) { const pending = G.sk.some(s => s.ko <= 0 && s.foT && hyp(s.x - s.foT[0], s.y - s.foT[1]) > 6); if (!pending || G.regT > 4.5) { finishRegroup(); return; } } }
   if (G.goalLight && G.state === 'play' && G.goalLight.t > 2.6) G.goalLight = null;
@@ -69,7 +70,7 @@ function update(dt){
     cs.strideT = (cs.strideT || 0) - dt;
     if (csp > 9 && (ix || iy) && !cs.braking && cs.strideT <= 0) { sfx('skate', 0.55 + csp/50); cs.strideT = 0.44 - Math.min(0.2, csp/130); }
   }
-  const P0 = G.pucks[0]; if (P0.passTo) { P0.passT -= dt; if (P0.passT <= 0 || P0.owner) P0.passTo = null; }
+  const P0 = G.pucks[0]; if (P0.passTo) { P0.passT -= dt; if (P0.passT <= 0 || P0.owner) { P0.passTo = null; if (!P0.owner) P0.passBy = null; } }
   const inputs = G.sk.map(s => { const hp = humanOf(s); return (G.state === 'regroup' || G.state === 'faceoff') ? regroupInput(s) : (hp >= 0 && G.state === 'play') ? readInput(hp) : (G.state === 'play' ? aiSkater(s, dt) : [0,0]); });
   const sub = 3, h = dt/sub;
   for (let i=0;i<sub;i++){
@@ -82,7 +83,7 @@ function update(dt){
     if (G.state === 'play') pickups();
     if (G.state === 'reset' || G.state === 'end') break;
   }
-  if (G.state === 'play') steals(dt);
+  if (G.state === 'play') { steals(dt); const Po = G.pucks[0].owner; if (Po) stat(Po.team, 'poss', dt); }
   if (G.state === 'faceoff' && G.foPuck) { const P = G.pucks[0]; P.x = G.foPuck.x; P.y = G.foPuck.y; P.vx = P.vy = 0; P.owner = null; }   // puck sits on the dot while stragglers settle
   for (const P of G.pucks) { const sp = hyp(P.vx, P.vy); P.trail.push([P.x, P.y, sp]); if (P.trail.length > 9) P.trail.shift(); }
   if (G.state === 'play' || G.state === 'goal') recordFrame();

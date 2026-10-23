@@ -42,6 +42,7 @@ for (const gfx of ['classic', 'med']) {
   await page.keyboard.press('KeyP');
   await tap('#btnQuit');
   await tap('#saveCopy');
+  await page.waitForFunction(() => document.getElementById('saveMsg').textContent.length > 0, null, { timeout: 5000 }).catch(() => {});   // the copy step finishes asynchronously
   const code = await page.inputValue('#saveCode');
   if (!code.startsWith('RRM1.')) fail(`${gfx}: save code missing`);
   await tap('#saveLoad');
@@ -56,9 +57,9 @@ for (const gfx of ['classic', 'med']) {
   await page.waitForFunction(() => window.__sim.G && window.__sim.G.state === 'play', null, { timeout: 30000 });
   const vs = await page.evaluate(() => ({ mode: window.__sim.G.mode, humans: window.__sim.humans(), p2team: window.__sim.humanSk(1) && window.__sim.humanSk(1).team }));
   if (vs.mode !== 'vs' || vs.humans !== 2 || vs.p2team !== 'away') fail(`${gfx}: versus not set up (${JSON.stringify(vs)})`);
-  const x0 = await page.evaluate(() => window.__sim.humanSk(1).x);
-  await page.keyboard.down('ArrowLeft'); await page.waitForTimeout(600); await page.keyboard.up('ArrowLeft');
-  const x1 = await page.evaluate(() => window.__sim.humanSk(1).x);
+  const x0 = await page.evaluate(() => (window.__p2 = window.__sim.humanSk(1)).x);   // follow this skater even if P2 auto-switches
+  await page.keyboard.down('ArrowLeft'); await page.waitForTimeout(900); await page.keyboard.up('ArrowLeft');
+  const x1 = await page.evaluate(() => window.__p2.x);
   if (!(x1 < x0 - 2)) fail(`${gfx}: player 2 did not move (${x0} -> ${x1})`);
   await page.keyboard.press('KeyP');
   await tap('#btnQuit');

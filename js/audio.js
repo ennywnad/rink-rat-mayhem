@@ -4,8 +4,8 @@
 // Sample pack in assets/sfx (built by tools/gen_sfx.py). Mixer: effects + crowd buses -> compressor -> master volume.
 // If a sample hasn't loaded (or fails), the old synthesised version plays instead.
 let AC = null, noise = null, master = null, sfxBus = null, crowdBus = null, crowdGain = null, crowdSrc = null;
-let volume = 0.8, crowdVol = 0.6;
-try { const v = parseFloat(localStorage.getItem('rinkrat-vol')); if (v >= 0 && v <= 1) volume = v; const c = parseFloat(localStorage.getItem('rinkrat-crowdvol')); if (c >= 0 && c <= 1) crowdVol = c; } catch(e) {}
+let volume = 0.8, crowdVol = 0.6, musicVol = 0.6, musicBus = null;
+try { const v = parseFloat(localStorage.getItem('rinkrat-vol')); if (v >= 0 && v <= 1) volume = v; const c = parseFloat(localStorage.getItem('rinkrat-crowdvol')); if (c >= 0 && c <= 1) crowdVol = c; const m = parseFloat(localStorage.getItem('rinkrat-musicvol')); if (m >= 0 && m <= 1) musicVol = m; } catch(e) {}
 const SFX_SET = { stick:4, shot:3, slap:3, board:3, post:2, pad:3, check:3, skate:4, stop:2, whistle:1, horn:1, buzzer:1, boom:1, splash:1, fire:1, zap:1, thunder:1, freeze:1, grow:1, rocket:1, saw:1, pickup:1, ko:1, level:1, cheer:1, aww:1, crowd:1 };
 const SFX_GAIN = { stick:0.5, shot:0.7, slap:0.85, board:0.7, post:0.55, pad:0.6, check:0.85, skate:0.16, stop:0.32, whistle:0.42, horn:0.5, buzzer:0.45, boom:0.8, splash:0.6, fire:0.55, zap:0.5, thunder:0.75, freeze:0.5, grow:0.6, rocket:0.55, saw:0.45, pickup:0.45, ko:0.55, level:0.5, cheer:0.75, aww:0.55 };
 const SFX_GAP = { skate:0.1, stick:0.04, cheer:1.5, aww:1.5 };
@@ -25,6 +25,7 @@ function decodeSfx(){
       if (name === 'crowd') startCrowd();
     }).catch(() => {});
   }
+  decodeMusic();
 }
 function ensureAudio(){
   if (!AC) {
@@ -32,8 +33,8 @@ function ensureAudio(){
     if (AC) {
       const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.25;
       master = AC.createGain(); master.gain.value = muted ? 0 : volume;
-      sfxBus = AC.createGain(); crowdBus = AC.createGain(); crowdBus.gain.value = crowdVol;
-      sfxBus.connect(comp); crowdBus.connect(comp); comp.connect(master); master.connect(AC.destination);
+      sfxBus = AC.createGain(); crowdBus = AC.createGain(); crowdBus.gain.value = crowdVol; musicBus = AC.createGain(); musicBus.gain.value = musicVol;
+      sfxBus.connect(comp); crowdBus.connect(comp); comp.connect(master); musicBus.connect(master); master.connect(AC.destination);
       decodeSfx();
     }
   }
@@ -46,7 +47,7 @@ function applyA11y(){
 }
 function applyVolume(){
   if (!AC) return; const t = AC.currentTime;
-  master.gain.setTargetAtTime(muted ? 0 : volume, t, 0.03); crowdBus.gain.setTargetAtTime(crowdVol, t, 0.05);
+  master.gain.setTargetAtTime(muted ? 0 : volume, t, 0.03); crowdBus.gain.setTargetAtTime(crowdVol, t, 0.05); musicBus.gain.setTargetAtTime(musicVol, t, 0.05);
 }
 function startCrowd(){
   if (crowdSrc || !sfxBuf.crowd) return;
@@ -124,4 +125,62 @@ function synthSfx(type, v){
     case 'buzzer': tone('square',196,1.0,0.08,0.01); tone('square',198.5,1.0,0.06,0.01); break;
     case 'level': [523,659,784,1047].forEach((f,i) => tone('square',f,0.18,0.07,0.005,null,i*0.09)); break;
   }
+}
+
+// ---------------- arena organ (the only music in the game)
+// Cues from tools/gen_sfx.py: a charge for the opening faceoff, rallies when the Rats press, a goal fanfare, a sad trombone-ish
+// fall for the other team's goals, little noodles at stoppages, a final-horn tag and a 16-bar loop for menus and intermissions.
+const MUSIC_SET = { intro:1, rally:1, goal:1, sad:1, end:1, noodle:3, loop:1 };
+const LOOP_LEN = 16*4*60/112;          // 16 bars at 112 bpm
+const musRaw = {}, musBuf = {};
+let musCue = null, musLoop = null, musSheet = 'hub', musDecoding = false;
+function decodeMusic(){
+  if (musDecoding || !AC) return; musDecoding = true;
+  for (const [name, n] of Object.entries(MUSIC_SET)) for (let i=0;i<n;i++) {
+    const file = n > 1 ? `org_${name}_${i}` : `org_${name}`;
+    fetch(`assets/sfx/${file}.mp3`).then(r => r.ok ? r.arrayBuffer() : null).then(ab => ab && new Promise((res, rej) => AC.decodeAudioData(ab, res, rej)))
+      .then(buf => { if (buf) (musBuf[name] || (musBuf[name] = [])).push(buf); }).catch(() => {});
+  }
+}
+const cueOn = () => musCue && AC && musCue.end > AC.currentTime;
+function fadeOut(node, f){
+  const t = AC.currentTime;
+  node.g.gain.cancelScheduledValues(t); node.g.gain.setValueAtTime(node.g.gain.value, t); node.g.gain.linearRampToValueAtTime(0, t + f);
+  try { node.src.stop(t + f + 0.05); } catch(e) {}
+}
+function stopCue(f = 0.25){ if (musCue && AC) fadeOut(musCue, f); musCue = null; }
+// play one cue; 'inter' asks for the loop instead
+function organ(cue, delay = 0){
+  if (!AC || !musicBus || (G && G.attract && cue !== 'inter')) return;
+  if (cue === 'inter') { stopCue(0.4); return organLoop(true); }
+  const list = musBuf[cue]; if (!list || !list.length) return;
+  organLoop(false); stopCue(0.25);
+  const buf = list[Math.floor(Math.random()*list.length)], t = AC.currentTime + delay;
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const g = AC.createGain(); g.gain.value = 0.72; src.connect(g); g.connect(musicBus); src.start(t);
+  musCue = { src, g, name:cue, end: t + buf.duration };
+}
+function organLoop(on){
+  if (!AC || !musicBus) return;
+  if (!on) { if (musLoop) { fadeOut(musLoop, 0.7); musLoop = null; } return; }
+  if (musLoop || !musBuf.loop) return;
+  const buf = musBuf.loop[0], lead = buf.duration - LOOP_LEN > 0.01 ? 1105/buf.sampleRate : 0;   // decoders that keep the mp3 encoder delay
+  const src = AC.createBufferSource(); src.buffer = buf; src.loop = true; src.loopStart = lead; src.loopEnd = Math.min(buf.duration, lead + LOOP_LEN);
+  const g = AC.createGain(), t = AC.currentTime; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.6, t + 1.6);
+  src.connect(g); g.connect(musicBus); src.start(t, lead);
+  musLoop = { src, g };
+}
+// show() reports which sheet is up; the loop plays under menus and intermissions (not the pause menu) once no cue is playing
+function musicSheet(which){ musSheet = which; if (!which) organLoop(false); }
+function musicFade(){ if (musCue && musCue.name !== 'rally') stopCue(1.4); }   // the puck drops: let the ice be heard
+function musicTick(){
+  if (!AC || !musicBus) return;
+  const live = G && !G.attract && G.state !== 'end';
+  if (musSheet && musSheet !== 'pause' && !live && !cueOn()) organLoop(true);
+  if (!G || G.attract || G.replay || paused || G.state !== 'play' || musSheet) return;
+  if (G.musNext == null) G.musNext = G.time + 35 + Math.random()*25;
+  if (G.time < G.musNext || cueOn()) return;
+  const y = G.pucks[0].y, press = G.mode === 'vs' ? Math.abs(y - 100) > 30 : y < 70;
+  if (!press) { G.musNext = G.time + 3; return; }
+  organ(Math.random() < 0.7 ? 'rally' : 'noodle'); G.musNext = G.time + 40 + Math.random()*30;
 }

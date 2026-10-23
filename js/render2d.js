@@ -335,7 +335,7 @@ function updateHud(){
   if (!G || G.attract) return;
   setT('sH', String(G.score.home)); setT('sA', String(G.score.away));
   setT('hSub', `SOG ${G.sog.home} · KO ${G.kos.home}`); setT('aSub', `SOG ${G.sog.away} · KO ${G.kos.away}`);
-  setT('clk', G.ch.len > 0 ? fmtClock(G.clock) : 'FREE');
+  setT('clk', G.vs && G.vs.ot ? 'OT' : G.ch.len > 0 ? fmtClock(G.clock) : 'FREE');
   const low = G.ch.len > 0 && G.clock < 20; if (hudCache.low !== low) { hudCache.low = low; $('clk').classList.toggle('low', low); }
   setT('objProg', condProg(G.ch.obj, G));
   const done = condMet(G.ch.obj, G); if (hudCache.done !== done) { hudCache.done = done; $('objLine').classList.toggle('done', done); }

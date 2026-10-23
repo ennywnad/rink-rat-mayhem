@@ -67,6 +67,7 @@
       <div class="btns">
         <button class="btn" id="btnResume" type="button">Back to the ice</button>
         <button class="btn ghost" id="btnPracSet" type="button" hidden>Practice settings</button>
+        <button class="btn ghost" id="btnStats" type="button">Game stats</button>
         <button class="btn ghost" id="btnTune" type="button">Feel tuning</button>
         <button class="btn ghost" id="btnMute" type="button">Sound: on</button>
         <button class="btn ghost" id="btnPauseCtrls" type="button">Controls</button>
@@ -75,6 +76,8 @@
       </div>
     </div></div></div>
     <div class="sheet" id="ctrls" hidden><div class="wrap" id="ctrlsWrap"></div></div>
+    <div class="sheet" id="vsset" hidden><div class="wrap" id="vsWrap"></div></div>
+    <div class="sheet" id="inter" hidden><div class="wrap center" id="interWrap"></div></div>
     <div class="sheet" id="prac" hidden><div class="wrap" id="pracWrap"></div></div>
     <div class="sheet" id="results" hidden><div class="wrap center"><div class="card" id="resCard" style="width:100%"></div></div></div>
   </div>
@@ -84,12 +87,14 @@
 <script src="js/match.js"></script>
 <script src="js/physics.js"></script>
 <script src="js/flow.js"></script>
+<script src="js/stats.js"></script>
 <script src="js/ai.js"></script>
 <script src="js/input.js"></script>
 <script src="js/update.js"></script>
 <script src="js/render2d.js"></script>
 <script src="js/overlay.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/versus.js"></script>
 <script src="js/main.js"></script>
 <script type="importmap">
 { "imports": {

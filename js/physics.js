@@ -172,6 +172,7 @@ function fireOneTimer(s){
   const v = s.skIn, base = v && hyp(v[0], v[1]) > 0.4 ? Math.atan2(v[1], v[0]) : Math.atan2(gy - P.y, CX - P.x);
   const err = isHuman(s) ? 0 : rand(-1, 1)*shotErr(s.team)*0.8;
   shoot(s, clamp(0.85 + (s.charge || 0)*0.27, 0, 1.12), assistAim(s, base) + err);
+  stat(s.team, 'ot');
   pop(s.x, s.y - 5, 'ONE-TIMER!', s.team === 'home' ? '#ffb51e' : '#c9a4ff', 14, 1.0);
   if (isHuman(s)) rumbleSk(s, 0.3, 0.8, 120);
 }
@@ -182,7 +183,7 @@ function startDeke(s, stick){
   if (P.owner !== s || s.charging || (s.dekeCd || 0) > 0 || s.stun > 0) return false;
   const m = stick ? hyp(stick[0], stick[1]) : 0;
   const kind = m > 0.4 ? 'drag' : 'btl', side = m > 0.4 ? (angDiff(Math.atan2(stick[1], stick[0]), s.face) >= 0 ? 1 : -1) : 1;
-  s.deke = { t:0, dur: kind === 'btl' ? 0.55 : 0.42, kind, side }; s.dekeCd = 1.0;
+  s.deke = { t:0, dur: kind === 'btl' ? 0.55 : 0.42, kind, side }; s.dekeCd = 1.0; stat(s.team, 'dekes');
   if (kind === 'drag') { const a = s.face + side*Math.PI/2; s.vx += Math.cos(a)*5; s.vy += Math.sin(a)*5; }
   let fooled = 0;
   for (const d of G.sk) {
@@ -337,6 +338,7 @@ function contact(a, b){
   if (power > 0) hit(att, vic, power*attrOf(att.team, 'check'), nx*sgn, ny*sgn);
 }
 function knockLoose(o, by){
+  stat(by.team, 'take');
   const P = G.pucks[0];
   P.owner = null; o.cool = 0.45; o.charging = false;
   const a = by.face + rand(-0.55, 0.55);
@@ -366,6 +368,7 @@ function aimAngle(s){
 function shoot(s, power, ang){
   const P = G.pucks[0];
   if (P.owner !== s) { s.charging = false; return; }
+  stat(s.team, 'att');
   if (ang == null) ang = aimAngle(s);
   let sp = (46 + 74*power)*attrOf(s.team, 'shot')*TUNE.shotPower;
   const armed = G.armed[s.team]; G.armed[s.team] = null;
@@ -390,6 +393,7 @@ function passTargets(s){ return G.sk.filter(m => m.team === s.team && m !== s &&
 function passPuck(s, pref){
   const P = G.pucks[0]; if (P.owner !== s) return false;
   const mates = passTargets(s); if (!mates.length) return false;
+  stat(s.team, 'passTry');
   const pa = pref != null ? pref : s.face;
   let best = null, bs = 1e9;
   for (const m of mates) {
@@ -400,7 +404,7 @@ function passPuck(s, pref){
   }
   const d = hyp(best.x-s.x, best.y-s.y), sp = clamp(38 + d*0.85, 44, 82)*TUNE.passSpeed, lt = d/sp;
   const tx = best.x + best.vx*lt*0.85, ty = best.y + best.vy*lt*0.85, a = Math.atan2(ty-P.y, tx-P.x);
-  P.owner = null; P.vx = Math.cos(a)*sp; P.vy = Math.sin(a)*sp; P.passTo = best; P.passT = 1.4; P.shotBy = null; P.last = s.team; P.team = s.team;
+  P.owner = null; P.vx = Math.cos(a)*sp; P.vy = Math.sin(a)*sp; P.passTo = best; P.passT = 1.4; P.passBy = s.team; P.shotBy = null; P.last = s.team; P.team = s.team;
   P.icing = (s.team === 'home' ? P.y > 100 : P.y < 100) ? s.team : null;
   s.cool = 0.28; s.charging = false; s.swing = 0.24; s.swingA = a;
   { const hp = humanOf(s); if (hp >= 0 && !isHuman(best)) { setHuman(hp, best); if (hp === 0) G.switchCd = 0.6; else G.switchCd2 = 0.6; } }
@@ -460,7 +464,7 @@ function goaliePuck(g, P){
   const vn = P.vx*nx + P.vy*ny;
   if (vn < 0) {
     if (P.shotBy && P.shotBy !== g.team && G.state === 'play') {
-      G.sog[P.shotBy]++; P.shotBy = null;
+      G.sog[P.shotBy]++; stat(g.team, 'saves'); P.shotBy = null;
       // remember the save for the animation: which side (goalie's right is +) and whether it came in high
       g.save = 0.55; g.saveLat = clamp((dx*-Math.sin(g.face) + dy*Math.cos(g.face))/rr, -1, 1); g.saveHigh = speed > 58 ? 1 : 0;
     }
@@ -577,6 +581,8 @@ function stepPuck(P, h){
 function take(s){
   const P = G.pucks[0];
   P.icing = null;
+  if (P.passBy && G.state === 'play') { if (P.passBy === s.team) stat(s.team, 'passes'); else stat(s.team, 'take'); }   // completed pass or interception
+  P.passBy = null;
   if (s.ot > 0 && G.state === 'play') { fireOneTimer(s); return; }
   P.owner = s; P.shotBy = null; P.last = s.team; P.team = s.team; P.passTo = null; P.fire = 0; P.homing = 0; P.powered = false;
   s.recv = 0.2; s.wind = 0; s.relT = 0;

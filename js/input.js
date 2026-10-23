@@ -179,6 +179,8 @@ function padConfirm(){
   if (vis('results')) return ($('resNext') || $('resRetry')).click();
   if (vis('kit')) return $('kitDone').click();
   if (vis('prac')) return $('pracGo').click();
+  if (vis('vsset')) return $('vsGo').click();
+  if (vis('inter')) { const b = $('interGo') || $('vfRematch') || $('statsBack'); if (b) b.click(); return; }
   if (vis('hub')) { const c = document.querySelector('.chal.next') || document.querySelector('.chal[data-i]:not(:disabled)'); if (c) c.click(); }
 }
 function padBack(){
@@ -188,6 +190,8 @@ function padBack(){
   if (vis('kit')) return $('kitDone').click();
   if (vis('results')) return $('resHub').click();
   if (vis('prac')) return $('pracBack').click();
+  if (vis('vsset')) return $('vsBack').click();
+  if (vis('inter') && $('statsBack')) return $('statsBack').click();
   if (vis('pause')) return setPaused(false);
 }
 function pollPad(){

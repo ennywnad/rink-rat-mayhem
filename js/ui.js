@@ -28,6 +28,10 @@ function renderHub(){
       <span class="num">P</span>
       <span class="cinfo"><span class="arena">PRACTICE RINK · NO XP</span><span class="ct">Practice</span><span class="co">Pick the arena, opponents and rules, and tune each team's speed, shot and checking.</span></span>
       <span class="lock" style="color:var(--hazard)">Set up</span></button>
+    <button class="chal prac" type="button" id="btnVersus">
+      <span class="num">VS</span>
+      <span class="cinfo"><span class="arena">FULL GAMES · NO XP</span><span class="ct">Versus</span><span class="co">Up to three periods with intermission stats: player 1 against player 2, two players against the CPU, or you against the CPU.</span></span>
+      <span class="lock" style="color:var(--hazard)">Set up</span></button>
     <div style="display:flex;flex-direction:column;gap:10px">
       <h3 class="h">Challenges</h3>
       ${CHALLENGES.map((c,i) => { const ul = unlockedIdx(i); return `<button class="chal${i===nIdx && ul ? ' next' : ''}" type="button" data-i="${i}" ${ul ? '' : 'disabled'}>
@@ -38,7 +42,8 @@ function renderHub(){
     <div class="card gfx"><h3 class="h">Sound</h3>
       <label class="tog"><input type="checkbox" id="sndOn" ${muted ? '' : 'checked'}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Sound</b><small>Also the speaker button in the scoreboard, or press M</small></span></label>
       <label class="sl home snd"><span>Volume</span><input type="range" id="sndVol" min="0" max="100" step="5" value="${Math.round(volume*100)}"><b id="sndVolV">${Math.round(volume*100)}%</b></label>
-      <label class="sl home snd"><span>Crowd</span><input type="range" id="sndCrowd" min="0" max="100" step="5" value="${Math.round(crowdVol*100)}"><b id="sndCrowdV">${Math.round(crowdVol*100)}%</b></label></div>
+      <label class="sl home snd"><span>Crowd</span><input type="range" id="sndCrowd" min="0" max="100" step="5" value="${Math.round(crowdVol*100)}"><b id="sndCrowdV">${Math.round(crowdVol*100)}%</b></label>
+      <label class="sl home snd"><span>Organ</span><input type="range" id="sndMusic" min="0" max="100" step="5" value="${Math.round(musicVol*100)}"><b id="sndMusicV">${Math.round(musicVol*100)}%</b></label></div>
     <div class="card gfx"><div class="kitrow"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><h3 class="h">Controls</h3><span class="xptext">Remap keys and controller buttons. Two players: one keyboard, keyboard + controller, or two controllers.</span></div><button class="btn ghost small" id="btnControls" type="button">Change</button></div></div>
     <div class="card gfx"><h3 class="h">Accessibility</h3>
       <label class="tog"><input type="checkbox" id="a_cb" ${A11Y.cb ? 'checked' : ''}><span class="sw" aria-hidden="true"></span><span class="tl"><b>Color-blind friendly teams</b><small>Rats in amber and black, every opponent in blue and white; health bars go blue to magenta</small></span></label>
@@ -65,6 +70,7 @@ function renderHub(){
   $('a_btn').querySelectorAll('button').forEach(b => b.onclick = () => { A11Y.btn = b.dataset.v; saveA11y(); applyA11y(); $('a_btn').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
   $('sndVol').oninput = e => { volume = Number(e.target.value)/100; $('sndVolV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-vol', String(volume)); } catch(err) {} ensureAudio(); applyVolume(); };
   $('sndCrowd').oninput = e => { crowdVol = Number(e.target.value)/100; $('sndCrowdV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-crowdvol', String(crowdVol)); } catch(err) {} ensureAudio(); applyVolume(); };
+  $('sndMusic').oninput = e => { musicVol = Number(e.target.value)/100; $('sndMusicV').textContent = e.target.value + '%'; try { localStorage.setItem('rinkrat-musicvol', String(musicVol)); } catch(err) {} ensureAudio(); applyVolume(); };
   $('sndVol').onchange = () => { sfx('stick', 1); };
   $('saveCopy').onclick = async () => {
     const code = exportSave(); $('saveCode').value = code;
@@ -79,6 +85,7 @@ function renderHub(){
   };
   document.querySelectorAll('#engSeg button').forEach(b => b.onclick = () => setEngine(b.dataset.e));
   $('btnPractice').onclick = () => openPractice(false);
+  $('btnVersus').onclick = () => openVersus();
   $('btnCfg').onclick = () => openGameCfg('hub');
   $('hubWrap').querySelectorAll('.chal[data-i]').forEach(b => b.onclick = () => openBrief(Number(b.dataset.i)));
 }
@@ -128,9 +135,10 @@ function renderKit(){
   });
 }
 function show(which){
-  for (const id of ['hub','brief','kit','pause','results','prac','ctrls']) $(id).hidden = id !== which;
-  const menu = which === 'hub' || which === 'brief' || which === 'kit' || which === 'results' || (which === 'prac' && !pracLive);
+  for (const id of ['hub','brief','kit','pause','results','prac','ctrls','vsset','inter']) $(id).hidden = id !== which;
+  const menu = which === 'hub' || which === 'brief' || which === 'kit' || which === 'results' || which === 'vsset' || (which === 'prac' && !pracLive);
   app.classList.toggle('menu', menu);
+  musicSheet(which);
   if (which) { const el = $(which); el.scrollTop = 0; }
   requestAnimationFrame(resize);
 }
@@ -149,6 +157,7 @@ function startChallenge(i){
   $('objText').textContent = condText(c.obj, c);
   show(null); paused = false; renderCtrlBar();
   setTimeout(resize, 30);
+  organ('intro');
   toast(c.title, c.start ? `Down ${c.start[0]}–${c.start[1]}. ${condText(c.obj, c)}` : condText(c.obj, c), 1700, 'small');
   wake();
 }
@@ -236,6 +245,7 @@ function startPractice(){
   $('objText').textContent = condText(c.obj, c);
   show(null); paused = false; renderCtrlBar();
   setTimeout(resize, 30);
+  organ('intro');
   toast('Practice', 'Free play · no XP · pause for settings', 1700, 'small');
   wake();
 }
@@ -251,6 +261,7 @@ function showResults(r){
     <div class="resulthead ${r.objOk ? 'win' : 'lose'}" style="display:flex;flex-direction:column;gap:8px"><p class="eyebrow">${c.arena.toUpperCase()} · ${c.title.toUpperCase()}</p><h2>${r.objOk ? 'Objective complete' : 'Objective failed'}</h2></div>
     <div class="final"><div><div class="n">${r.score.home}</div><div class="who">RATS</div></div><div class="dash">–</div><div><div class="n">${r.score.away}</div><div class="who">${c.opp.abbr}</div></div></div>
     <p class="lede" style="font-size:14px;text-align:center">Shots ${r.sog.home}–${r.sog.away} · Body count ${r.kos.home}–${r.kos.away}</p>
+    <details class="statsbox"><summary>Game stats</summary>${statsTable()}</details>
     <ul class="goals">${labels.map((g,i) => `<li class="${r.got[i]?'ok':'no'}"><span class="${r.got[i]?'star-on':'star-off'}">${svg('star', true)}</span><span>${condText(g, c)}</span><span class="tag">${r.newStars[i] ? 'NEW STAR' : r.got[i] ? 'DONE' : 'MISSED'}</span></li>`).join('')}</ul>
     <dl class="xprows">${r.rows.map(([k,v]) => `<div><dt>${k}</dt><dd>+${v}</dd></div>`).join('')}<div class="tot"><dt>XP earned</dt><dd>+${r.total}</dd></div></dl>
     <div class="lvl"><div class="lvbadge"><small>LEVEL</small><span>${r.after.L}</span></div><div class="xpbar"><i id="resXp"></i></div><div class="xptext">${levelUp ? `<b>Level up!</b> ` : ''}<b>${r.after.into}</b> / ${r.after.need} XP to level ${r.after.L+1}</div></div>
@@ -302,12 +313,12 @@ function toggleTune(on){
 }
 function preparePause(over){
   const pr = !!G.practice;
-  $('btnPracSet').hidden = false;
+  $('btnPracSet').hidden = !!G.vs;
   $('btnPracSet').textContent = pr ? 'Practice settings' : 'Rules and sliders';
-  $('btnRestart').textContent = pr ? 'Restart practice' : 'Restart challenge';
+  $('btnRestart').textContent = G.vs ? 'Restart game' : pr ? 'Restart practice' : 'Restart challenge';
   $('btnResume').hidden = !!over;
   $('pauseTitle').textContent = over ? 'Practice over' : 'Timeout';
-  $('pauseInfo').textContent = pr ? (over ? `Practice over · ${G.score.home}–${G.score.away}` : `Practice · ${G.score.home}–${G.score.away}`) : `${G.ch.title} · ${fmtClock(G.clock)} left`;
+  $('pauseInfo').textContent = G.vs ? `${vsText()} · ${G.vs.ot ? 'sudden death' : fmtClock(G.clock) + ' left'}` : pr ? (over ? `Practice over · ${G.score.home}–${G.score.away}` : `Practice · ${G.score.home}–${G.score.away}`) : `${G.ch.title} · ${fmtClock(G.clock)} left`;
 }
 function setPaused(p){
   if (!G || G.attract) return;
@@ -318,7 +329,8 @@ function setPaused(p){
 }
 $('btnPause').onclick = () => setPaused(!paused);
 $('btnResume').onclick = () => setPaused(false);
-$('btnRestart').onclick = () => { paused = false; if (G && G.practice) startPractice(); else startChallenge(selected); };
+$('btnRestart').onclick = () => { paused = false; if (G && G.vs) startVersus(); else if (G && G.practice) startPractice(); else startChallenge(selected); };
+$('btnStats').onclick = () => showStatsFromPause();
 $('btnTune').onclick = () => toggleTune(true);
 $('btnPauseCtrls').onclick = () => openControls('pause');
 applyA11y();

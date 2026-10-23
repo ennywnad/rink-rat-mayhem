@@ -123,10 +123,12 @@ function newMatch(ch, attract, mode){
     powersUsed:0, powerGoals:0, power:{ home:null, away:null }, armed:{ home:null, away:null }, powerT:{ home:-99, away:-99 },
     aiPowT:{ home:3, away:3 }, crates:[], crateT:4, traps:[], walls:[], parts:[], pops:[], rings:[], bolts:[], beams:[], shake:0,
     ctrl: attract ? -1 : 0, ctrl2:-1, switchCd:0, switchCd2:0, mode: attract ? '1p' : (mode || '1p'), objShown:false, goalLight:null, low:!!ch.hz.low, endT:0,
-    practice:pr, effort: pr ? pr.effort : 'full', rules: pr ? { ...pr.rules } : attract ? { ...DEFAULT_RULES } : { ...gameCfg.rules }, attr: pr ? JSON.parse(JSON.stringify(pr.attrs)) : attract ? { home:defAttrs(), away:defAttrs() } : JSON.parse(JSON.stringify(gameCfg.attrs)), regT:0, foSpot:null };
+    practice:pr, effort: pr ? pr.effort : 'full', rules: ch.vsCfg ? { ...ch.vsCfg.rules } : pr ? { ...pr.rules } : attract ? { ...DEFAULT_RULES } : { ...gameCfg.rules }, attr: pr ? JSON.parse(JSON.stringify(pr.attrs)) : attract ? { home:defAttrs(), away:defAttrs() } : JSON.parse(JSON.stringify(gameCfg.attrs)), regT:0, foSpot:null };
   if (ch.start) { G.score.home = ch.start[0]; G.score.away = ch.start[1]; }
   G.hz = buildHazards(G.rules.hazards ? ch.hz : {});
-  const nHome = pr ? 1 + pr.mates : ch.short && !attract ? 2 : 3, nAway = pr ? pr.opp : 3;
+  G.stats = newStats();
+  const vc = ch.vsCfg || null;
+  const nHome = vc ? vc.skaters : pr ? 1 + pr.mates : ch.short && !attract ? 2 : 3, nAway = vc ? vc.skaters : pr ? pr.opp : 3;
   G.sk = [];
   for (let i=0;i<nHome;i++) { const s = mkSkater('home', i, i, 'rat'); s.max = i===0 && !attract ? 27 : 25; G.sk.push(s); }
   for (let i=0;i<nAway;i++) { const s = mkSkater('away', i, i, ch.opp.species); s.max = Math.min(27.5, 22.4 + tier*0.75); s.acc = 60 + tier*3; if (ch.opp.species==='ogre') { s.r = s.baseR = 2.9; } G.sk.push(s); }
@@ -170,6 +172,7 @@ function startRegroup(spot){
   for (const g of [G.gH, G.gA]) { g.hold = 0; g.cool = 0.5; }
   const T = foTargets(spot);
   for (const s of G.sk) { s.charging = false; s.charge = 0; s.rocket = 0; s.foT = T[s.team][s.idx % 3]; s.drill = null; }
+  if (!G.attract && !cueOn() && G.state !== 'goal' && Math.random() < 0.6) organ('noodle', 0.4);
   G.state = 'regroup'; G.regT = 0; G.foSpot = spot; G.goalLight = G.goalLight && G.goalLight.t < 2 ? G.goalLight : null;
 }
 function finishRegroup(){

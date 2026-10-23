@@ -193,6 +193,7 @@ function aiPowers(tm, dt){
 function usePower(tm, user){
   const p = G.power[tm]; if (!p || G.state !== 'play') return;
   user = user || powerUser(tm); if (!user || user.ko > 0) return;
+  stat(tm, 'pw');
   G.power[tm] = null; G.powerT[tm] = G.time; G.aiPowT[tm] = rand(2.5, 6);
   if (tm === 'home' && !G.attract) G.powersUsed++;
   const opp = other(tm), col = tm === 'home' ? '#ffb51e' : '#c9a4ff';

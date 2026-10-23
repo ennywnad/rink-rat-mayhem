@@ -113,8 +113,10 @@ def verb(x, wet=0.25, stereo=False, short=False, tail=1.0):
     r = signal.fftconvolve(x, IR_R)[:len(x)]
     return np.stack([x * (1 - wet * 0.5) + l * wet, x * (1 - wet * 0.5) + r * wet], 1)
 
-def finish(x, peak_db=-1.0, fade=0.03):
+def finish(x, peak_db=-1.0, fade=0.03, loop=False):
     x = np.asarray(x, dtype=np.float64)
+    if loop:   # loops keep their exact length: no trim, no fade
+        x = x - x.mean(axis=0); return x / (np.abs(x).max() + 1e-9) * 10 ** (peak_db / 20)
     # trim trailing near-silence
     mono = np.abs(x).max(axis=1) if x.ndim == 2 else np.abs(x)
     thr = mono.max() * 10 ** (-60 / 20); idx = np.nonzero(mono > thr)[0]
@@ -127,9 +129,9 @@ def finish(x, peak_db=-1.0, fade=0.03):
     x = x - x.mean(axis=0)
     return x / (np.abs(x).max() + 1e-9) * 10 ** (peak_db / 20)
 
-def write(name, x, br='96k'):
+def write(name, x, br='96k', loop=False):
     os.makedirs(OUT, exist_ok=True)
-    x = finish(x)
+    x = finish(x, loop=loop)
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
         wavfile.write(f.name, SR, (x * 32767).astype(np.int16))
         tmp = f.name
@@ -415,8 +417,123 @@ def aww():
     return np.stack([verb(x[:, 0], 0.45, tail=1.0), verb(x[:, 1], 0.45, tail=1.0)], 1)
 
 
+
+# ------------------------------------------------------------------ arena organ (the only music in the game)
+# A drawbar organ (16' 8' 5 1/3' 4' footages, percussion, key click) through a rotary speaker and a big arena,
+# playing original stadium-organ cues. Scores are lists of (beat, length in beats, midi notes).
+ORNG = np.random.default_rng(1966)
+DRAW = [(0.5, 0.75), (1.0, 1.0), (1.5, 0.75), (2.0, 0.85), (3.0, 0.35), (4.0, 0.3), (6.0, 0.12), (8.0, 0.12)]
+mtof = lambda m: 440.0 * 2 ** ((m - 69) / 12)
+
+def organ_voice(f, dur):
+    t = T(dur + 0.04); y = np.zeros_like(t)
+    for ratio, amp in DRAW:
+        fr = f * ratio
+        if fr < SR / 2 - 500: y += amp * np.sin(2 * np.pi * fr * t + ORNG.uniform(0, 6.28))
+    perc = np.sin(2 * np.pi * f * 3 * t) * np.exp(-t / 0.18) * 0.55          # third-harmonic percussion
+    n = len(t); e = np.ones(n); a = int(0.004 * SR); r = int(0.035 * SR)
+    e[:a] = np.linspace(0, 1, a); e[-r:] = np.linspace(1, 0, r)
+    clk = np.zeros(n); clk[:220] = ORNG.standard_normal(220) * np.exp(-np.arange(220) / 30) * 0.25   # key click
+    return (y + perc) * e + filt(clk, 'hp', 1500)
+
+def organ_render(score, bpm, total_beats, tail=2.4, wet=0.5):
+    spb = 60 / bpm; dur = total_beats * spb + 0.3
+    x = np.zeros(int(dur * SR))
+    for beat, length, notes in score:
+        for m in (notes if isinstance(notes, (list, tuple)) else [notes]):
+            v = organ_voice(mtof(m), length * spb * 0.92)
+            i = int(beat * spb * SR); j = min(len(x), i + len(v)); x[i:j] += v[:j - i] * 0.16
+    # rotary speaker: horn and drum spin at slightly different speeds, opposite phase left/right
+    t = np.arange(len(x)) / SR
+    l = x * (1 + 0.22 * np.sin(2 * np.pi * 6.6 * t)) ; r = x * (1 + 0.22 * np.sin(2 * np.pi * 6.6 * t + np.pi))
+    def dop(sig, ph):
+        d = (0.00045 * (1 + np.sin(2 * np.pi * 6.1 * t + ph))) * SR
+        idx = np.clip(np.arange(len(sig)) - d, 0, len(sig) - 1); i0 = idx.astype(int); fr = idx - i0
+        return sig[i0] * (1 - fr) + sig[np.minimum(i0 + 1, len(sig) - 1)] * fr
+    l, r = dop(l, 0), dop(r, np.pi)
+    l, r = sat(filt(l, 'lp', 6500), 1.6), sat(filt(r, 'lp', 6500), 1.6)
+    out = np.stack([verb(l, wet, tail=tail), verb(r, wet, tail=tail)], 1)
+    return out
+
+def chord(root, kind='maj', inv=0):
+    iv = {'maj':[0,4,7], 'min':[0,3,7], 'dom7':[0,4,7,10], 'sus':[0,5,7], 'dim':[0,3,6]}[kind]
+    n = [root + i for i in iv]
+    for _ in range(inv): n = n[1:] + [n[0] + 12]
+    return n
+
+def org_intro():      # period start: a rising call and a big held chord (original)
+    sc = [(0, .5, 72), (.5, .5, 76), (1, .5, 79), (1.5, .5, 81), (2, .5, 79), (2.5, .5, 76), (3, .5, 72), (3.5, .5, 74),
+          (4, 2.5, chord(64, 'maj') + [76]), (4, 2.5, [48, 55]),
+          (6.75, .25, chord(65)), (7, 3, chord(67, 'maj') + [79]), (7, 3, [43, 55])]
+    return organ_render(sc, 140, 10)
+
+def org_rally():      # chromatic build then the two-and-three clap rhythm
+    sc = [(i * .5, .45, 60 + i) for i in range(8)]
+    for k, b in enumerate([4, 5, 6, 6.5, 7, 8, 9, 10, 10.5, 11]):
+        sc.append((b, .4, chord(67, 'dom7') if k < 5 else chord(72)))
+    sc += [(4, 4, [43]), (8, 4, [48])]
+    return organ_render(sc, 150, 12.5)
+
+def org_goal():       # celebration: walking boogie bass, bright stabs, a run to the top
+    sc = []
+    prog = [(48, 'maj'), (53, 'maj'), (48, 'maj'), (55, 'dom7')]
+    for bar, (root, kind) in enumerate(prog):
+        for q, step in enumerate([0, 4, 7, 9, 10, 9, 7, 4]):
+            sc.append((bar * 4 + q * .5, .45, root - 12 + step))
+        for q in (0.5, 1.5, 2.5, 3.5): sc.append((bar * 4 + q, .3, chord(root + 12, kind)))
+    sc += [(16 + i * .25, .24, 72 + s) for i, s in enumerate([0, 2, 4, 5, 7, 9, 11, 12])]
+    sc += [(18, 3, chord(72) + [84]), (18, 3, [36, 48])]
+    return organ_render(sc, 160, 21.5)
+
+def org_sad():        # the other team scored: a drooping 'wah wah'
+    sc = [(0, .9, [70, 58]), (1, .9, [69, 57]), (2, .9, [68, 56]), (3, 3, [67, 55, 63])]
+    x = organ_render(sc, 108, 6.2, wet=0.45)
+    t = np.arange(len(x)) / SR; return x * (1 + 0.25 * np.sin(2 * np.pi * 5.2 * t))[:, None]
+
+def org_noodle(k):    # stoppage filler (three originals)
+    if k == 0:   # oom-pah-pah waltz in F
+        mel = [(0, 77), (1, 81), (2, 84), (3, 82), (4, 81), (5, 79), (6, 77), (7, 79), (8, 81)]
+        sc = [(b, .9, m) for b, m in mel] + [(9, 2.5, chord(65) + [77])]
+        for bar in range(4): sc += [(bar * 3, .9, [41 if bar % 2 == 0 else 48]), (bar * 3 + 1, .8, chord(57, 'maj', 1)), (bar * 3 + 2, .8, chord(57, 'maj', 1))]
+        return organ_render(sc, 168, 12)
+    if k == 1:   # walk-up and a wink
+        sc = [(i * .5, .45, [55 + i, 67 + i]) for i in range(6)] + [(3.5, .4, chord(72)), (4.5, .4, chord(72)), (5, 2, chord(67, 'dom7')), (7, 2, chord(72) + [84])]
+        return organ_render(sc, 132, 9)
+    mel = [(0, 67), (.5, 69), (1, 71), (1.5, 74), (2, 71), (3, 67), (4, 69), (4.5, 71), (5, 72), (6, 76), (7, 74)]   # ballpark bounce
+    sc = [(b, .45, m) for b, m in mel] + [(8, 2.5, chord(67) + [79])] + [(b, .4, [43 if int(b) % 2 == 0 else 50]) for b in range(8)]
+    return organ_render(sc, 144, 10.5)
+
+def org_end():        # buzzer flourish and a long final chord
+    sc = [(i * .25, .24, 60 + s) for i, s in enumerate([0, 4, 7, 12, 16, 19, 24])] + [(2, 1, chord(65, 'maj')), (3, 4, chord(72) + [84]), (3, 4, [36, 48])]
+    return organ_render(sc, 120, 7.2)
+
+def org_loop():       # locker room / intermission: an easy 16-bar organ swing that loops cleanly
+    bpm, bars = 112, 16
+    prog = [65, 65, 70, 65, 72, 70, 65, 72, 65, 65, 70, 70, 65, 72, 65, 72]
+    kinds = ['maj', 'maj', 'maj', 'maj', 'dom7', 'maj', 'maj', 'dom7', 'maj', 'maj', 'maj', 'maj', 'maj', 'dom7', 'maj', 'dom7']
+    mel = [77, 81, 84, 81, 82, 79, 77, 76, 77, 81, 84, 86, 84, 82, 81, 79]
+    sc = []
+    for b in range(bars):
+        root, kind, m = prog[b], kinds[b], mel[b]
+        sc += [(b * 4, .9, [root - 24]), (b * 4 + 2, .9, [root - 17])]
+        sc += [(b * 4 + 1, .45, chord(root - 12, kind)), (b * 4 + 3, .45, chord(root - 12, kind))]
+        sc += [(b * 4, 1.4, m), (b * 4 + 1.5, .45, m - 3 if b % 2 else m + 2), (b * 4 + 2, 1.8, m - 5 if b % 4 == 3 else m)]
+    x = organ_render(sc, bpm, bars * 4, tail=2.4, wet=0.42)
+    n = int(bars * 4 * 60 / bpm * SR)
+    loop = x[:n].copy(); tail = x[n:]
+    loop[:len(tail)] += tail[:n]                    # wrap the reverb tail onto the start so the loop is seamless
+    return loop
+
+ORGAN = {'org_intro': org_intro, 'org_rally': org_rally, 'org_goal': org_goal, 'org_sad': org_sad, 'org_end': org_end,
+         'org_noodle_0': lambda: org_noodle(0), 'org_noodle_1': lambda: org_noodle(1), 'org_noodle_2': lambda: org_noodle(2)}
+
 # ------------------------------------------------------------------ render the pack
 if __name__ == '__main__':
+    import sys
+    if '--organ' in sys.argv:
+        for name, fn in ORGAN.items(): write(name, fn(), br='128k')
+        write('org_loop', org_loop(), br='112k', loop=True)
+        sys.exit(0)
     variants = {
         'stick': (stick_tap, 4), 'shot': (wrist_shot, 3), 'slap': (slap_shot, 3), 'board': (boards, 3),
         'post': (post, 2), 'pad': (pad_save, 3), 'check': (body_check, 3), 'skate': (skate_stride, 4), 'stop': (hockey_stop, 2),
@@ -432,3 +549,5 @@ if __name__ == '__main__':
     for name, fn in singles.items():
         write(f'{name}_0', fn(), br='112k' if name in ('horn', 'cheer') else '96k')
     write('crowd_0', crowd_loop(), br='80k')
+    for name, fn in ORGAN.items(): write(name, fn(), br='128k')
+    write('org_loop', org_loop(), br='112k', loop=True)

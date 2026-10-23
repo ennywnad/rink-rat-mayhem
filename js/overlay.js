@@ -184,7 +184,7 @@ function setGfx(p){
 }
 window.__sim = {
   replayView, humanSk, humans, humanOf, reducedMotion: () => !!A11Y.rm,
-  audio: () => ({ ctx: AC ? AC.state : null, loaded: Object.values(sfxBuf).reduce((n, l) => n + l.length, 0), crowd: !!crowdSrc, muted, volume, crowdVol }),
+  audio: () => ({ ctx: AC ? AC.state : null, loaded: Object.values(sfxBuf).reduce((n, l) => n + l.length, 0), crowd: !!crowdSrc, muted, volume, crowdVol, musicVol, music: cueOn() ? musCue.name : null, loop: !!musLoop, organ: Object.values(musBuf).reduce((n, l) => n + l.length, 0) }),
   get G(){ return G; }, ctrlSk, stickPt, aimAngle, HOME, SPECIES,
   C:{ RW, RL, CR, CX, GT, GB, PL, PRt, ND, PUCK_R, SK_R, G_R },
   stageW: () => cw, stageH: () => ch,
@@ -196,6 +196,7 @@ window.__sim = {
 if (/[?&]debug\b/.test(location.search)) Object.assign(window.__sim, {
   step(n, dt = 1/60, each){ for (let i = 0; i < n; i++) { if (each) each(i); update(dt); } },
   keys, startChallenge: (i, mode) => { chMode = mode || '1p'; startChallenge(i); }, startPractice: cfg => { Object.assign(practice, cfg || {}); startPractice(); },
+  startVersus: cfg => { Object.assign(vsCfg, cfg || {}); startVersus(); },
 });
 function gfxEngine(){ try { return localStorage.getItem('rinkrat-gfx-engine') || 'webgpu'; } catch(e) { return 'webgpu'; } }
 function setEngine(e){
