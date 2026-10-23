@@ -66,7 +66,7 @@ If the 3D view fails a startup check, the game steps down on its own: first lowe
 
 ## Feel tuning
 
-Press **`** (backtick) or open **Feel tuning** from the pause menu to get live sliders for skating (turn rates, hockey stops), the stick (speed, reach, puck grip), shooting and passing (wind-up, flick zone, shot speed, aim assist) and hits (knockdown threshold, knockback). The game keeps running while the panel is open, changes save in your browser, and **Copy values** puts your changes on the clipboard so they can become the new defaults in `js/game.js` (`TUNE_DEF` in `js/match.js`).
+Press **`** (backtick) or open **Feel tuning** from the pause menu to get live sliders for skating (turn rates, hockey stops), the stick (speed, reach, puck grip), shooting and passing (wind-up, flick zone, shot speed, aim assist) and hits (knockdown threshold, knockback). The game keeps running while the panel is open, changes save in your browser, and **Copy values** puts your changes on the clipboard so they can become the new defaults (`TUNE_DEF` in `js/match.js`).
 
 ## Sound
 
